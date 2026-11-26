@@ -1,0 +1,8 @@
+{
+	"appId": "com.smartvolumescheduler.app",
+	"appName": "Smart Volume Scheduler",
+	"webDir": "dist",
+	"android": {
+		"backgroundColor": "#0B111A"
+	}
+}

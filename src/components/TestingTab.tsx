@@ -1,0 +1,497 @@
+import React, { useState } from 'react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  PhoneCall,
+  Play,
+  Power,
+  RefreshCw,
+  ShieldAlert,
+  XCircle,
+} from 'lucide-react';
+import type {
+  AudioModeProbeResponse,
+  AudioStreamKey,
+  BootRestoreInfo,
+  ExecutionLogEntry,
+  PermissionStatusResponse,
+  StreamTestResponse,
+  TestAlarmResponse,
+} from '../types/volume';
+import { formatTimestamp, getStreamLabel } from '../utils/formatters';
+
+interface TestingTabProps {
+  isNative: boolean;
+  permissions: PermissionStatusResponse;
+  bootRestore: BootRestoreInfo;
+  logs: ExecutionLogEntry[];
+  onTestStream: (
+    stream: AudioStreamKey,
+    percentage: number,
+    playTone: boolean
+  ) => Promise<StreamTestResponse>;
+  onScheduleTestAlarm: (
+    secondsFromNow: number,
+    stream: AudioStreamKey,
+    percentage: number
+  ) => Promise<TestAlarmResponse>;
+  onProbeAudioMode: () => Promise<AudioModeProbeResponse>;
+  onRefreshLogs: () => Promise<void>;
+}
+
+export const TestingTab: React.FC<TestingTabProps> = ({
+  isNative,
+  permissions,
+  bootRestore,
+  logs,
+  onTestStream,
+  onScheduleTestAlarm,
+  onProbeAudioMode,
+  onRefreshLogs,
+}) => {
+  const [testPct, setTestPct] = useState<number>(65);
+  const [testingStream, setTestingStream] = useState<AudioStreamKey | null>(null);
+  const [streamResult, setStreamResult] = useState<StreamTestResponse | null>(null);
+
+  const [alarmStream, setAlarmStream] = useState<AudioStreamKey>('ringtone');
+  const [alarmPct, setAlarmPct] = useState<number>(70);
+  const [alarmDelay, setAlarmDelay] = useState<number>(10);
+  const [alarmResult, setAlarmResult] = useState<TestAlarmResponse | null>(null);
+  const [schedulingAlarm, setSchedulingAlarm] = useState(false);
+
+  const [probeData, setProbeData] = useState<AudioModeProbeResponse | null>(null);
+  const [probing, setProbing] = useState(false);
+
+  const handleRunStreamTest = async (stream: AudioStreamKey) => {
+    setTestingStream(stream);
+    try {
+      const res = await onTestStream(stream, testPct, true);
+      setStreamResult(res);
+    } finally {
+      setTestingStream(null);
+    }
+  };
+
+  const handleRunAlarmTest = async () => {
+    setSchedulingAlarm(true);
+    try {
+      const res = await onScheduleTestAlarm(alarmDelay, alarmStream, alarmPct);
+      setAlarmResult(res);
+    } finally {
+      setSchedulingAlarm(false);
+    }
+  };
+
+  const handleProbe = async () => {
+    setProbing(true);
+    try {
+      const res = await onProbeAudioMode();
+      setProbeData(res);
+    } finally {
+      setProbing(false);
+    }
+  };
+
+  const streamButtons: Array<{ key: AudioStreamKey; label: string; note: string }> = [
+    { key: 'ringtone', label: 'Test Ringtone Volume', note: 'AudioManager.STREAM_RING' },
+    { key: 'notification', label: 'Test Notification Volume', note: 'AudioManager.STREAM_NOTIFICATION' },
+    { key: 'alarm', label: 'Test Alarm Volume', note: 'AudioManager.STREAM_ALARM' },
+    { key: 'voice_call', label: 'Test Call Volume', note: 'AudioManager.STREAM_VOICE_CALL (min step >= 1)' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Section 1: Stream Volume Tests */}
+      <section className="bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">
+              Hardware Audio Stream Verification
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Applies the selected percentage through Android AudioManager, plays a brief probe tone, and reads back the actual hardware index.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {[25, 50, 75, 100].map((pct) => (
+              <button
+                key={pct}
+                type="button"
+                onClick={() => setTestPct(pct)}
+                className={`min-h-[40px] px-3 rounded-lg text-xs font-mono-tabular font-medium border transition-colors ${
+                  testPct === pct
+                    ? 'bg-cyan-400 text-[#0B111A] border-cyan-400 font-semibold'
+                    : 'bg-[#0B111A] text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                {pct}%
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {streamButtons.map((btn) => (
+            <button
+              key={btn.key}
+              type="button"
+              disabled={testingStream !== null}
+              onClick={() => void handleRunStreamTest(btn.key)}
+              className="min-h-[56px] px-4 py-3 rounded-xl bg-[#0B111A] border border-slate-800 hover:border-cyan-400/60 text-left flex items-center justify-between gap-3 transition-colors disabled:opacity-60"
+            >
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-slate-100">{btn.label}</div>
+                <div className="text-xs font-mono-tabular text-slate-400 truncate mt-0.5">
+                  {btn.note}
+                </div>
+              </div>
+              <Play className="w-4 h-4 text-cyan-400 shrink-0" />
+            </button>
+          ))}
+        </div>
+
+        {streamResult && (
+          <div
+            className={`rounded-xl border p-4 text-sm space-y-1.5 ${
+              streamResult.applyResult.success
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+            }`}
+          >
+            <div className="flex items-center gap-2 font-semibold">
+              {streamResult.applyResult.success ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              )}
+              <span>
+                {streamResult.applyResult.success
+                  ? `${getStreamLabel(streamResult.applyResult.stream)} Verified`
+                  : `${getStreamLabel(streamResult.applyResult.stream)} Failed`}
+              </span>
+            </div>
+            <p className="text-xs leading-relaxed opacity-95">
+              {streamResult.applyResult.message}
+            </p>
+            {streamResult.applyResult.success && (
+              <p className="text-xs font-mono-tabular text-slate-300">
+                Actual step: {streamResult.applyResult.actualIndex}/{streamResult.applyResult.maxIndex} ({streamResult.applyResult.actualPercentage}%) · {streamResult.toneMessage}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Section 2: Scheduled Execution Test */}
+      <section className="bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">
+              Test Scheduled Background Execution
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Queues a real native AlarmManager broadcast. Lock your screen or swipe the app from recent apps after starting to verify autonomous execution.
+            </p>
+          </div>
+          <Clock className="w-5 h-5 text-cyan-400 shrink-0" />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">
+              Delay
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {[10, 30].map((sec) => (
+                <button
+                  key={sec}
+                  type="button"
+                  onClick={() => setAlarmDelay(sec)}
+                  className={`min-h-[44px] rounded-xl text-xs font-mono-tabular font-medium border ${
+                    alarmDelay === sec
+                      ? 'bg-cyan-400 text-[#0B111A] border-cyan-400 font-semibold'
+                      : 'bg-[#0B111A] text-slate-300 border-slate-800'
+                  }`}
+                >
+                  {sec}s
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="test-alarm-stream"
+              className="block text-xs font-medium text-slate-400 mb-1.5"
+            >
+              Stream
+            </label>
+            <select
+              id="test-alarm-stream"
+              value={alarmStream}
+              onChange={(e) => setAlarmStream(e.target.value as AudioStreamKey)}
+              className="w-full min-h-[44px] px-3 rounded-xl bg-[#0B111A] border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
+            >
+              <option value="ringtone">Ringtone</option>
+              <option value="notification">Notification</option>
+              <option value="alarm">Alarm</option>
+              <option value="media">Media</option>
+              <option value="voice_call">Voice Call</option>
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="test-alarm-pct"
+              className="block text-xs font-medium text-slate-400 mb-1.5"
+            >
+              Target %
+            </label>
+            <input
+              id="test-alarm-pct"
+              type="number"
+              min={0}
+              max={100}
+              value={alarmPct}
+              onChange={(e) =>
+                setAlarmPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)))
+              }
+              className="w-full min-h-[44px] px-3 rounded-xl bg-[#0B111A] border border-slate-800 text-sm font-mono-tabular text-slate-100 focus:outline-none focus:border-cyan-400"
+            />
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => void handleRunAlarmTest()}
+          disabled={schedulingAlarm}
+          className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl bg-cyan-400 text-[#0B111A] text-sm font-semibold hover:bg-cyan-300 disabled:opacity-60 transition-colors"
+        >
+          {schedulingAlarm
+            ? 'Scheduling...'
+            : `Schedule Test Alarm (${alarmDelay}s)`}
+        </button>
+
+        {alarmResult && (
+          <div
+            className={`rounded-xl border p-4 text-xs space-y-1 ${
+              alarmResult.success
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+            }`}
+          >
+            <div className="flex items-center gap-2 font-semibold text-sm">
+              {alarmResult.success ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              )}
+              <span>
+                {alarmResult.success
+                  ? `Queued (${alarmResult.mode})`
+                  : 'Test Alarm Failed'}
+              </span>
+            </div>
+            <p className="leading-relaxed">{alarmResult.message}</p>
+            {alarmResult.nextTriggerAt > 0 && (
+              <p className="font-mono-tabular text-slate-300">
+                Scheduled fire time: {formatTimestamp(alarmResult.nextTriggerAt)}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Section 3: WhatsApp VoIP Investigation & Live Stream Probe */}
+      <section className="bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <PhoneCall className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-base font-semibold text-slate-100">
+                WhatsApp Call Volume Limitation & Live Probe
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Empirical stream checker for VoIP calls on your device
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-[#0B111A] border border-slate-800 rounded-xl p-4 space-y-2.5 text-xs text-slate-300 leading-relaxed">
+          <div className="flex items-start gap-2 text-amber-300 font-medium">
+            <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              Android does not allow third-party apps to isolate WhatsApp-only call volume.
+            </span>
+          </div>
+          <p>
+            WhatsApp VoIP calls route audio through Android&apos;s shared system streams—typically{' '}
+            <span className="font-mono-tabular text-slate-100">STREAM_VOICE_CALL</span> when in{' '}
+            <span className="font-mono-tabular text-slate-100">MODE_IN_COMMUNICATION</span>, or Bluetooth/Media routing depending on your headset and Vivo Android 16 audio policy.
+          </p>
+          <p>
+            This app intentionally avoids Accessibility Services, root access, or private API hooks. Use the live probe below while on a WhatsApp call to verify whether <span className="font-mono-tabular text-slate-100">Voice Call</span> or <span className="font-mono-tabular text-slate-100">Media</span> changes your call loudness.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => void handleProbe()}
+            disabled={probing}
+            className="min-h-[44px] px-4 py-2 rounded-xl bg-[#0B111A] border border-cyan-400/50 text-cyan-300 text-xs font-semibold hover:bg-cyan-400/10 transition-colors flex items-center gap-2"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${probing ? 'animate-spin' : ''}`} />
+            <span>Probe Live Audio Mode</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleRunStreamTest('voice_call')}
+            disabled={testingStream !== null}
+            className="min-h-[44px] px-4 py-2 rounded-xl bg-[#0B111A] border border-slate-700 text-slate-200 text-xs font-medium hover:border-slate-600 transition-colors"
+          >
+            Apply {testPct}% to Voice Call
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleRunStreamTest('media')}
+            disabled={testingStream !== null}
+            className="min-h-[44px] px-4 py-2 rounded-xl bg-[#0B111A] border border-slate-700 text-slate-200 text-xs font-medium hover:border-slate-600 transition-colors"
+          >
+            Apply {testPct}% to Media
+          </button>
+        </div>
+
+        {probeData && (
+          <div className="bg-[#0B111A] border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono-tabular text-slate-200">
+              <span>AudioMode: {probeData.audioMode}</span>
+              <span>Ringer: {probeData.ringerMode}</span>
+              <span>Speakerphone: {probeData.isSpeakerphoneOn ? 'ON' : 'OFF'}</span>
+              <span>BT SCO: {probeData.isBluetoothScoOn ? 'ON' : 'OFF'}</span>
+            </div>
+            <p className="text-slate-400">
+              {probeData.audioMode === 'MODE_IN_COMMUNICATION'
+                ? 'Active VoIP communication session detected (WhatsApp/VoIP call). Android typically maps hardware volume keys to STREAM_VOICE_CALL in this mode.'
+                : probeData.native
+                  ? 'No active VoIP session detected (MODE_NORMAL). Start a WhatsApp voice call and tap Probe Live Audio Mode again to confirm.'
+                  : 'Web preview mode: live AudioManager.getMode() inspection requires the installed Android APK.'}
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* Section 4: Reboot Persistence Verification */}
+      <section className="bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <Power className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-base font-semibold text-slate-100">
+                Reboot & App-Update Persistence Test
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Native BootCompletedReceiver restores all AlarmManager schedules after restart
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <div className="bg-[#0B111A] border border-slate-800 rounded-xl p-3.5">
+            <div className="text-slate-400">Receiver Component</div>
+            <div className="font-semibold text-slate-100 mt-1 flex items-center gap-1.5">
+              {isNative && permissions.bootReceiverRegistered ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Registered</span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>{isNative ? 'Disabled' : 'APK Required'}</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-[#0B111A] border border-slate-800 rounded-xl p-3.5">
+            <div className="text-slate-400">Last Boot Restore</div>
+            <div className="font-mono-tabular font-semibold text-slate-100 mt-1">
+              {formatTimestamp(bootRestore.lastBootRestoreAt)}
+            </div>
+          </div>
+
+          <div className="bg-[#0B111A] border border-slate-800 rounded-xl p-3.5">
+            <div className="text-slate-400">Restored Rules</div>
+            <div className="font-mono-tabular font-semibold text-slate-100 mt-1">
+              {bootRestore.lastBootRestoreAt > 0
+                ? `${bootRestore.lastBootRestoredCount} (${bootRestore.lastBootRestoreReason})`
+                : 'Awaiting first reboot'}
+            </div>
+          </div>
+        </div>
+
+        <p className="text-xs text-slate-400 leading-relaxed">
+          To verify on your Vivo T5x 5G: ensure Battery Optimization is unrestricted in Permissions, restart the phone, unlock once, and reopen this screen—the Last Boot Restore timestamp above will update automatically from native SharedPreferences.
+        </p>
+      </section>
+
+      {/* Section 5: Real Native Execution Log */}
+      <section className="bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">
+              Native Execution History
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Real outcomes recorded by Android VolumeSchedulerStorage
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void onRefreshLogs()}
+            className="min-h-[40px] px-3 py-1.5 rounded-lg bg-[#0B111A] border border-slate-800 text-xs text-slate-300 hover:text-cyan-300"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {logs.length === 0 ? (
+          <p className="text-xs text-slate-400 py-4 text-center">
+            {isNative
+              ? 'No native executions recorded yet. Run a stream test or schedule a 10s test alarm above.'
+              : 'Execution logs populate from native SharedPreferences when running inside the Android APK.'}
+          </p>
+        ) : (
+          <div className="divide-y divide-slate-800/80">
+            {logs.slice(0, 12).map((entry) => (
+              <div key={entry.id} className="py-3 flex items-start justify-between gap-3 text-xs">
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2 font-medium text-slate-200">
+                    {entry.success ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    ) : (
+                      <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    )}
+                    <span>{entry.source}</span>
+                    <span className="text-slate-600" aria-hidden="true">·</span>
+                    <span className="text-cyan-300">{getStreamLabel(entry.stream)}</span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">{entry.message}</p>
+                </div>
+                <span className="font-mono-tabular text-slate-500 shrink-0 text-right">
+                  {formatTimestamp(entry.timestamp)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+};
