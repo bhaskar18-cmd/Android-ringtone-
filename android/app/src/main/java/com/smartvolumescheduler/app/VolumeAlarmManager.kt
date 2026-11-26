@@ -120,23 +120,17 @@ object VolumeAlarmManager {
         )
 
         val exactAllowed = canScheduleExactAlarms(context)
-        val usedExact: Boolean
-        val mode: String
-
-        if (exactAllowed) {
+        val (usedExact, mode) = if (exactAllowed) {
             try {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-                usedExact = true
-                mode = "exact"
+                true to "exact"
             } catch (_: SecurityException) {
                 am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-                usedExact = false
-                mode = "inexact_fallback"
+                false to "inexact_fallback"
             }
         } else {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-            usedExact = false
-            mode = "inexact_fallback"
+            false to "inexact_fallback"
         }
 
         val updated = schedule.copy(nextTriggerAt = triggerAt)
