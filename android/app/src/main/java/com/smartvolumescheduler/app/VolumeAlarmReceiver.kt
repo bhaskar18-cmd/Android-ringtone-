@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
 import java.util.UUID
-import kotlin.math.roundToInt
 
 class VolumeAlarmReceiver : BroadcastReceiver() {
 
@@ -53,6 +52,7 @@ class VolumeAlarmReceiver : BroadcastReceiver() {
                     val invalidResult = StreamTestResult(
                         stream = streamKey,
                         requestedPercentage = pct,
+                        indexBefore = 0,
                         targetIndex = 0,
                         actualIndex = 0,
                         minIndex = 0,
@@ -70,6 +70,7 @@ class VolumeAlarmReceiver : BroadcastReceiver() {
                         ),
                         dndBlocked = false,
                         fixedVolume = false,
+                        failureReason = "Unsupported audio stream: $streamKey",
                         source = "BACKGROUND_TEST_ALARM",
                         timestamp = System.currentTimeMillis(),
                         message = "Unsupported audio stream: $streamKey"
@@ -95,13 +96,17 @@ class VolumeAlarmReceiver : BroadcastReceiver() {
                         id = UUID.randomUUID().toString(),
                         timestamp = testResult.timestamp,
                         source = "BACKGROUND_TEST_ALARM",
-                        scheduleId = "test-alarm",
+                        ruleId = "test-alarm",
+                        ruleName = "Background Test (${streamType.label})",
+                        scheduledTime = "",
                         stream = testResult.stream,
                         requestedPercentage = testResult.requestedPercentage,
+                        indexBefore = testResult.indexBefore,
                         actualIndex = testResult.actualIndex,
                         maxIndex = testResult.maxIndex,
                         actualPercentage = testResult.actualPercentage,
                         success = testResult.volumeApplied,
+                        failureReason = testResult.failureReason,
                         message = testResult.message
                     )
                 )
@@ -111,93 +116,152 @@ class VolumeAlarmReceiver : BroadcastReceiver() {
 
             val scheduleId = intent.getStringExtra(VolumeAlarmManager.EXTRA_SCHEDULE_ID)
             if (scheduleId.isNullOrBlank()) {
+                VolumeSchedulerStorage.appendLog(
+                    context,
+                    ExecutionLogEntry(
+                        id = UUID.randomUUID().toString(),
+                        timestamp = System.currentTimeMillis(),
+                        source = "RULE_SKIPPED",
+                        ruleId = "",
+                        ruleName = "Unknown Rule",
+                        scheduledTime = "",
+                        stream = "none",
+                        requestedPercentage = 0,
+                        indexBefore = 0,
+                        actualIndex = 0,
+                        maxIndex = 0,
+                        actualPercentage = 0,
+                        success = false,
+                        failureReason = "Native receiver failure: missing rule ID in broadcast intent.",
+                        message = "Alarm fired without a rule ID."
+                    )
+                )
                 completeAsync()
                 return
             }
 
             val schedulerEnabled = VolumeSchedulerStorage.isSchedulerEnabled(context)
             val schedule = VolumeSchedulerStorage.getScheduleById(context, scheduleId)
-            if (schedule == null || !schedulerEnabled || !schedule.enabled) {
-                completeAsync()
-                return
-            }
-
-            val enabledEntries = AudioStreamType.entries.mapNotNull { st ->
-                val cfg = schedule.streams[st.key]
-                if (cfg != null && cfg.enabled) st to cfg else null
-            }
-
-            if (enabledEntries.isEmpty()) {
-                completeAsync()
-                return
-            }
-
-            val initialResults = linkedMapOf<AudioStreamType, VolumeApplyResult>()
-            enabledEntries.forEach { (st, cfg) ->
-                initialResults[st] = VolumeController.applyVolume(
-                    context = context,
-                    streamKey = st.key,
-                    requestedPercentage = cfg.percentage,
-                    showSystemUi = false
-                )
-            }
-
-            // Re-read final hardware state for every enabled stream so linked/clamped hardware levels are reported accurately
-            val am = VolumeController.getAudioManager(context)
-            val now = System.currentTimeMillis()
-            var allSucceeded = true
-            val summaryParts = mutableListOf<String>()
-
-            enabledEntries.forEach { (st, cfg) ->
-                val initRes = initialResults[st]!!
-                val finalIndex = am.getStreamVolume(st.androidStream)
-                val finalMax = initRes.maxIndex.coerceAtLeast(1)
-                val finalPct = ((finalIndex.toDouble() / finalMax.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
-                val streamOk = initRes.success && (finalIndex == initRes.targetIndex)
-                if (!streamOk) {
-                    allSucceeded = false
-                }
-
-                val streamMessage = if (streamOk) {
-                    "${st.label} $finalIndex/$finalMax ($finalPct% for ${cfg.percentage}%)"
-                } else {
-                    "${st.label} failed (${initRes.message})"
-                }
-                summaryParts.add(streamMessage)
-
+            if (schedule == null) {
                 VolumeSchedulerStorage.appendLog(
                     context,
                     ExecutionLogEntry(
                         id = UUID.randomUUID().toString(),
-                        timestamp = now,
-                        source = "SCHEDULE",
-                        scheduleId = schedule.id,
-                        stream = st.key,
-                        requestedPercentage = cfg.percentage,
-                        actualIndex = finalIndex,
-                        maxIndex = finalMax,
-                        actualPercentage = finalPct,
-                        success = streamOk,
-                        message = if (streamOk) {
-                            "Scheduled ${st.label}: set $finalIndex/$finalMax ($finalPct% achieved for ${cfg.percentage}% requested)."
-                        } else {
-                            initRes.message
-                        }
+                        timestamp = System.currentTimeMillis(),
+                        source = "RULE_SKIPPED",
+                        ruleId = scheduleId,
+                        ruleName = "Deleted Rule",
+                        scheduledTime = "",
+                        stream = "none",
+                        requestedPercentage = 0,
+                        indexBefore = 0,
+                        actualIndex = 0,
+                        maxIndex = 0,
+                        actualPercentage = 0,
+                        success = false,
+                        failureReason = "Alarm canceled or rule removed before execution.",
+                        message = "Rule $scheduleId no longer exists."
                     )
                 )
+                VolumeAlarmManager.cancelSchedule(context, scheduleId)
+                completeAsync()
+                return
             }
 
-            val updatedSchedule = schedule.copy(
-                lastExecutedAt = now,
-                lastExecutionSuccess = allSucceeded,
-                lastExecutionMessage = summaryParts.joinToString(" · ")
+            if (!schedulerEnabled || !schedule.enabled) {
+                val skipReason = if (!schedulerEnabled) {
+                    "Master scheduler disabled when alarm fired."
+                } else {
+                    "Rule disabled when alarm fired."
+                }
+                VolumeSchedulerStorage.appendLog(
+                    context,
+                    ExecutionLogEntry(
+                        id = UUID.randomUUID().toString(),
+                        timestamp = System.currentTimeMillis(),
+                        source = "RULE_SKIPPED",
+                        ruleId = schedule.id,
+                        ruleName = schedule.label.ifBlank { "Rule ${schedule.time}" },
+                        scheduledTime = schedule.time,
+                        stream = "none",
+                        requestedPercentage = 0,
+                        indexBefore = 0,
+                        actualIndex = 0,
+                        maxIndex = 0,
+                        actualPercentage = 0,
+                        success = false,
+                        failureReason = skipReason,
+                        message = skipReason
+                    )
+                )
+                VolumeAlarmManager.cancelSchedule(context, schedule.id)
+                completeAsync()
+                return
+            }
+
+            val rawSlotMillis = intent.getLongExtra(VolumeAlarmManager.EXTRA_SLOT_MILLIS, 0L)
+            val slotMillis = rawSlotMillis
+                .takeIf { it > 0L }
+                ?: (VolumeAlarmManager.getPassedTodaySlotMillis(schedule.time, schedule.days) ?: System.currentTimeMillis())
+
+            if (rawSlotMillis > 0L && schedule.lastExecutedSlotMillis == rawSlotMillis) {
+                VolumeSchedulerStorage.appendLog(
+                    context,
+                    ExecutionLogEntry(
+                        id = UUID.randomUUID().toString(),
+                        timestamp = System.currentTimeMillis(),
+                        source = "RULE_SKIPPED",
+                        ruleId = schedule.id,
+                        ruleName = schedule.label.ifBlank { "Rule ${schedule.time}" },
+                        scheduledTime = schedule.time,
+                        stream = "none",
+                        requestedPercentage = 0,
+                        indexBefore = 0,
+                        actualIndex = 0,
+                        maxIndex = 0,
+                        actualPercentage = 0,
+                        success = true,
+                        failureReason = "Duplicate alarm ignored: scheduled slot already executed.",
+                        message = "Skipped duplicate broadcast for already-executed slot."
+                    )
+                )
+                VolumeAlarmManager.scheduleSingle(context, schedule)
+                notifyForegroundUi(context)
+                completeAsync()
+                return
+            }
+
+            val outcome = VolumeRuleExecutor.executeRule(
+                context = context,
+                schedule = schedule,
+                source = "SCHEDULE",
+                slotMillis = slotMillis
             )
 
-            VolumeSchedulerStorage.upsertSchedule(context, updatedSchedule)
-            VolumeAlarmManager.scheduleSingle(context, updatedSchedule)
+            VolumeAlarmManager.scheduleSingle(context, outcome.updatedSchedule)
             notifyForegroundUi(context)
             completeAsync()
-        } catch (_: Exception) {
+        } catch (ex: Exception) {
+            VolumeSchedulerStorage.appendLog(
+                context,
+                ExecutionLogEntry(
+                    id = UUID.randomUUID().toString(),
+                    timestamp = System.currentTimeMillis(),
+                    source = "RULE_SKIPPED",
+                    ruleId = intent.getStringExtra(VolumeAlarmManager.EXTRA_SCHEDULE_ID) ?: "",
+                    ruleName = "Receiver Error",
+                    scheduledTime = "",
+                    stream = "none",
+                    requestedPercentage = 0,
+                    indexBefore = 0,
+                    actualIndex = 0,
+                    maxIndex = 0,
+                    actualPercentage = 0,
+                    success = false,
+                    failureReason = "Native receiver failure: ${ex.message ?: "unexpected exception"}",
+                    message = "Native alarm receiver failed: ${ex.message ?: "unknown error"}"
+                )
+            )
             completeAsync()
         }
     }

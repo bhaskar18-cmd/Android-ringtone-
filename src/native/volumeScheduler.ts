@@ -78,6 +78,7 @@ function normalizeSchedule(raw: Partial<VolumeSchedule> & { stream?: AudioStream
     enabled: raw.enabled ?? true,
     nextTriggerAt: raw.nextTriggerAt ?? 0,
     lastExecutedAt: raw.lastExecutedAt ?? 0,
+    lastExecutedSlotMillis: raw.lastExecutedSlotMillis ?? 0,
     lastExecutionSuccess: raw.lastExecutionSuccess ?? true,
     lastExecutionMessage: raw.lastExecutionMessage ?? '',
   };
@@ -197,6 +198,8 @@ function buildWebSettings(): VolumeSettingsResponse {
     audioMode: 'WEB_PREVIEW',
     isVolumeFixed: false,
     isDoNotDisturbActive: false,
+    streamsAliased: false,
+    streamsAliasedNote: '',
     schedulerEnabled: state.schedulerEnabled,
     schedules: state.schedules,
     nextScheduledChange: next,
@@ -268,6 +271,7 @@ export const volumeScheduler = {
       appliedExactTarget: false,
       stream,
       requestedPercentage: percentage,
+      indexBefore: 0,
       targetIndex: 0,
       actualIndex: 0,
       actualPercentage: 0,
@@ -275,6 +279,8 @@ export const volumeScheduler = {
       maxIndex: 15,
       dndBlocked: false,
       fixedVolume: false,
+      streamUnavailable: true,
+      failureReason: 'Browser preview cannot modify Android AudioManager streams.',
       message:
         'Browser preview cannot modify Android AudioManager streams. Install the Android APK to apply real system volume changes.',
     };
@@ -308,6 +314,7 @@ export const volumeScheduler = {
           ? computeNextLocalTrigger(params.time, days)
           : 0,
       lastExecutedAt: existing?.lastExecutedAt ?? 0,
+      lastExecutedSlotMillis: existing?.lastExecutedSlotMillis ?? 0,
       lastExecutionSuccess: existing?.lastExecutionSuccess ?? true,
       lastExecutionMessage: existing?.lastExecutionMessage ?? '',
     });
@@ -327,6 +334,7 @@ export const volumeScheduler = {
       scheduled: false,
       exact: false,
       mode: 'web_preview',
+      executedImmediately: false,
       message:
         'Saved in web preview storage. Native AlarmManager scheduling activates inside the Android APK.',
     };
@@ -372,7 +380,13 @@ export const volumeScheduler = {
   async toggleScheduleEnabled(
     id: string,
     enabled: boolean
-  ): Promise<{ success: boolean; schedule: VolumeSchedule; mode: string; message: string }> {
+  ): Promise<{
+    success: boolean;
+    schedule: VolumeSchedule;
+    mode: string;
+    executedImmediately?: boolean;
+    message: string;
+  }> {
     if (isNativeAndroid()) {
       const res = await NativeVolumeScheduler.toggleScheduleEnabled({ id, enabled });
       return {
@@ -483,6 +497,7 @@ export const volumeScheduler = {
     return {
       stream,
       requestedPercentage: percentage ?? 0,
+      indexBefore: 0,
       targetIndex: 0,
       actualIndex: 0,
       minIndex: 0,
@@ -496,6 +511,7 @@ export const volumeScheduler = {
       ringerMode: 'normal',
       dndBlocked: false,
       fixedVolume: false,
+      failureReason: 'Running in web browser, not Android Capacitor runtime.',
       source: 'FOREGROUND_TEST',
       timestamp: Date.now(),
       message:

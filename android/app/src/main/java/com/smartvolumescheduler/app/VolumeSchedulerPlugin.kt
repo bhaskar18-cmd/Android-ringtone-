@@ -91,13 +91,17 @@ class VolumeSchedulerPlugin : Plugin() {
                 id = UUID.randomUUID().toString(),
                 timestamp = System.currentTimeMillis(),
                 source = "MANUAL",
-                scheduleId = "",
+                ruleId = "",
+                ruleName = "Manual Control",
+                scheduledTime = "",
                 stream = result.stream,
                 requestedPercentage = result.requestedPercentage,
+                indexBefore = result.indexBefore,
                 actualIndex = result.actualIndex,
                 maxIndex = result.maxIndex,
                 actualPercentage = result.actualPercentage,
                 success = result.success,
+                failureReason = result.failureReason,
                 message = result.message
             )
         )
@@ -130,7 +134,6 @@ class VolumeSchedulerPlugin : Plugin() {
                 )
             }
         } else {
-            // Backward-compatible single-stream parameters
             val singleStream = call.getString("stream")
             val singlePct = call.getInt("percentage")
             if (singleStream.isNullOrBlank() || singlePct == null) {
@@ -168,21 +171,36 @@ class VolumeSchedulerPlugin : Plugin() {
         if (days.isEmpty()) {
             days.addAll(listOf(0, 1, 2, 3, 4, 5, 6))
         }
+        val sortedDays = days.sorted()
+
+        val configChanged = existing == null ||
+            existing.time != time.trim() ||
+            existing.days != sortedDays ||
+            existing.streams != parsedStreams
 
         val schedule = VolumeSchedule(
             id = id,
             label = label.trim(),
             time = time.trim(),
             streams = parsedStreams,
-            days = days.sorted(),
+            days = sortedDays,
             enabled = enabled,
             lastExecutedAt = existing?.lastExecutedAt ?: 0L,
+            lastExecutedSlotMillis = if (existing != null && existing.time == time.trim() && existing.days == sortedDays) {
+                existing.lastExecutedSlotMillis
+            } else {
+                0L
+            },
             lastExecutionSuccess = existing?.lastExecutionSuccess ?: true,
             lastExecutionMessage = existing?.lastExecutionMessage ?: ""
         )
 
         VolumeSchedulerStorage.upsertSchedule(context, schedule)
-        val dispatch = VolumeAlarmManager.scheduleSingle(context, schedule)
+        val dispatch = VolumeAlarmManager.applyPastTimeIfNeededAndSchedule(
+            context = context,
+            schedule = schedule,
+            forceImmediateIfPassed = configChanged
+        )
         val saved = VolumeSchedulerStorage.getScheduleById(context, id) ?: schedule
 
         val res = JSObject().apply {
@@ -191,6 +209,7 @@ class VolumeSchedulerPlugin : Plugin() {
             put("scheduled", dispatch.scheduled)
             put("exact", dispatch.exact)
             put("mode", dispatch.mode)
+            put("executedImmediately", dispatch.executedImmediately)
             put("message", dispatch.message)
         }
         call.resolve(res)
@@ -223,8 +242,31 @@ class VolumeSchedulerPlugin : Plugin() {
             call.reject("Missing required parameter: id.")
             return
         }
+        val existing = VolumeSchedulerStorage.getScheduleById(context, id)
         VolumeAlarmManager.cancelSchedule(context, id)
         val (deleted, remaining) = VolumeSchedulerStorage.deleteSchedule(context, id)
+        if (deleted && existing != null) {
+            VolumeSchedulerStorage.appendLog(
+                context,
+                ExecutionLogEntry(
+                    id = UUID.randomUUID().toString(),
+                    timestamp = System.currentTimeMillis(),
+                    source = "ALARM_CANCELED",
+                    ruleId = existing.id,
+                    ruleName = existing.label.ifBlank { "Rule ${existing.time}" },
+                    scheduledTime = existing.time,
+                    stream = "system",
+                    requestedPercentage = 0,
+                    indexBefore = 0,
+                    actualIndex = 0,
+                    maxIndex = 0,
+                    actualPercentage = 0,
+                    success = true,
+                    failureReason = "",
+                    message = "Rule deleted and native AlarmManager alarm canceled."
+                )
+            )
+        }
         val arr = JSArray()
         remaining.forEach { arr.put(it.toJson()) }
 
@@ -248,15 +290,55 @@ class VolumeSchedulerPlugin : Plugin() {
             call.reject("Schedule not found: $id")
             return
         }
+
         val updated = existing.copy(enabled = enabled)
         VolumeSchedulerStorage.upsertSchedule(context, updated)
-        val dispatch = VolumeAlarmManager.scheduleSingle(context, updated)
-        val saved = VolumeSchedulerStorage.getScheduleById(context, id) ?: updated
 
+        val dispatch = if (enabled) {
+            VolumeAlarmManager.applyPastTimeIfNeededAndSchedule(
+                context = context,
+                schedule = updated,
+                forceImmediateIfPassed = false
+            )
+        } else {
+            VolumeAlarmManager.cancelSchedule(context, updated.id)
+            val disabledSaved = updated.copy(nextTriggerAt = 0L)
+            VolumeSchedulerStorage.upsertSchedule(context, disabledSaved)
+            VolumeSchedulerStorage.appendLog(
+                context,
+                ExecutionLogEntry(
+                    id = UUID.randomUUID().toString(),
+                    timestamp = System.currentTimeMillis(),
+                    source = "ALARM_CANCELED",
+                    ruleId = updated.id,
+                    ruleName = updated.label.ifBlank { "Rule ${updated.time}" },
+                    scheduledTime = updated.time,
+                    stream = "system",
+                    requestedPercentage = 0,
+                    indexBefore = 0,
+                    actualIndex = 0,
+                    maxIndex = 0,
+                    actualPercentage = 0,
+                    success = true,
+                    failureReason = "",
+                    message = "Rule disabled and native AlarmManager alarm canceled."
+                )
+            )
+            AlarmDispatchResult(
+                scheduled = false,
+                exact = false,
+                nextTriggerAt = 0L,
+                mode = "disabled",
+                message = "Rule disabled and pending alarm canceled."
+            )
+        }
+
+        val saved = VolumeSchedulerStorage.getScheduleById(context, id) ?: updated
         call.resolve(JSObject().apply {
             put("success", true)
             put("schedule", JSObject.fromJSONObject(saved.toJson()))
             put("mode", dispatch.mode)
+            put("executedImmediately", dispatch.executedImmediately)
             put("message", dispatch.message)
         })
     }
@@ -298,7 +380,7 @@ class VolumeSchedulerPlugin : Plugin() {
         call.resolve(JSObject().apply {
             put("success", true)
             put("schedulerEnabled", false)
-            put("message", "Scheduler disabled. All pending native alarms cancelled.")
+            put("message", "Scheduler disabled. All pending native alarms canceled.")
         })
     }
 
@@ -468,13 +550,17 @@ class VolumeSchedulerPlugin : Plugin() {
                 id = UUID.randomUUID().toString(),
                 timestamp = testResult.timestamp,
                 source = "FOREGROUND_TEST",
-                scheduleId = "",
+                ruleId = "",
+                ruleName = "Stream Test (${stream.label})",
+                scheduledTime = "",
                 stream = testResult.stream,
                 requestedPercentage = testResult.requestedPercentage,
+                indexBefore = testResult.indexBefore,
                 actualIndex = testResult.actualIndex,
                 maxIndex = testResult.maxIndex,
                 actualPercentage = testResult.actualPercentage,
                 success = testResult.volumeApplied,
+                failureReason = testResult.failureReason,
                 message = testResult.message
             )
         )
@@ -573,6 +659,7 @@ class VolumeSchedulerPlugin : Plugin() {
         VolumeSchedulerStorage.getLogs(context).forEach { logsArr.put(it.toJson()) }
 
         val lastTest = VolumeSchedulerStorage.getLastTestAlarmResult(context)
+        val (aliased, aliasedNote) = VolumeSchedulerStorage.getStreamsAliasedInfo(context)
 
         return JSObject().apply {
             put("native", true)
@@ -581,6 +668,8 @@ class VolumeSchedulerPlugin : Plugin() {
             put("audioMode", VolumeController.getAudioModeString(am))
             put("isVolumeFixed", am.isVolumeFixed)
             put("isDoNotDisturbActive", VolumeController.isDoNotDisturbActive(context))
+            put("streamsAliased", aliased)
+            put("streamsAliasedNote", aliasedNote)
             put("schedulerEnabled", schedulerEnabled)
             put("schedules", schedulesArr)
             if (next != null) {

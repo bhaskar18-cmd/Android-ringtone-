@@ -13,10 +13,12 @@ object VolumeSchedulerStorage {
     private const val KEY_INITIALIZED = "defaults_initialized_v1"
     private const val KEY_LOGS = "execution_logs_json"
     private const val KEY_LAST_TEST_RESULT = "last_test_alarm_result_json"
+    private const val KEY_STREAMS_ALIASED = "streams_aliased_detected"
+    private const val KEY_STREAMS_ALIASED_NOTE = "streams_aliased_note"
     private const val KEY_LAST_BOOT_AT = "last_boot_restore_at"
     private const val KEY_LAST_BOOT_REASON = "last_boot_restore_reason"
     private const val KEY_LAST_BOOT_COUNT = "last_boot_restored_count"
-    private const val MAX_LOGS = 40
+    private const val MAX_LOGS = 50
 
     private fun prefs(context: Context): SharedPreferences {
         return context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -173,6 +175,21 @@ object VolumeSchedulerStorage {
     }
 
     @Synchronized
+    fun setStreamsAliased(context: Context, aliased: Boolean, note: String) {
+        prefs(context).edit()
+            .putBoolean(KEY_STREAMS_ALIASED, aliased)
+            .putString(KEY_STREAMS_ALIASED_NOTE, note)
+            .commit()
+    }
+
+    @Synchronized
+    fun getStreamsAliasedInfo(context: Context): Pair<Boolean, String> {
+        val p = prefs(context)
+        return p.getBoolean(KEY_STREAMS_ALIASED, false) to
+            (p.getString(KEY_STREAMS_ALIASED_NOTE, "") ?: "")
+    }
+
+    @Synchronized
     fun recordBootRestore(context: Context, reason: String, restoredCount: Int) {
         val now = System.currentTimeMillis()
         prefs(context).edit()
@@ -187,13 +204,17 @@ object VolumeSchedulerStorage {
                 id = UUID.randomUUID().toString(),
                 timestamp = now,
                 source = "BOOT_RESTORE",
-                scheduleId = "",
+                ruleId = "",
+                ruleName = "Boot & System Restore",
+                scheduledTime = "",
                 stream = "system",
                 requestedPercentage = 0,
+                indexBefore = 0,
                 actualIndex = 0,
                 maxIndex = 0,
                 actualPercentage = 0,
                 success = true,
+                failureReason = "",
                 message = "Restored $restoredCount enabled schedule(s) on $reason."
             )
         )

@@ -223,6 +223,18 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
       )}
 
+      {settings.native && settings.streamsAliased && (
+        <div className="bg-[#121A26] border border-slate-700/90 rounded-2xl p-4 text-xs text-slate-300 space-y-1">
+          <p className="font-semibold text-amber-300">
+            Device Audio Policy Notice: Ringtone &amp; Notification Linked
+          </p>
+          <p className="text-slate-400 leading-relaxed">
+            {settings.streamsAliasedNote ||
+              'Android links Ringtone and Notification volumes on this device. Adjusting one stream moves the other.'}
+          </p>
+        </div>
+      )}
+
       {/* Live System Audio Stream Readouts */}
       <section>
         <div className="flex items-center justify-between mb-3">

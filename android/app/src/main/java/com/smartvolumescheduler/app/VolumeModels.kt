@@ -34,7 +34,11 @@ data class StreamRuleConfig(
     }
 
     companion object {
-        fun fromJson(obj: JSONObject?, defaultEnabled: Boolean = false, defaultPct: Int = 70): StreamRuleConfig {
+        fun fromJson(
+            obj: JSONObject?,
+            defaultEnabled: Boolean = false,
+            defaultPct: Int = 70
+        ): StreamRuleConfig {
             if (obj == null) {
                 return StreamRuleConfig(defaultEnabled, defaultPct.coerceIn(0, 100))
             }
@@ -55,6 +59,7 @@ data class VolumeSchedule(
     val enabled: Boolean,
     val nextTriggerAt: Long = 0L,
     val lastExecutedAt: Long = 0L,
+    val lastExecutedSlotMillis: Long = 0L,
     val lastExecutionSuccess: Boolean = true,
     val lastExecutionMessage: String = ""
 ) {
@@ -77,6 +82,7 @@ data class VolumeSchedule(
         obj.put("enabled", enabled)
         obj.put("nextTriggerAt", nextTriggerAt)
         obj.put("lastExecutedAt", lastExecutedAt)
+        obj.put("lastExecutedSlotMillis", lastExecutedSlotMillis)
         obj.put("lastExecutionSuccess", lastExecutionSuccess)
         obj.put("lastExecutionMessage", lastExecutionMessage)
         return obj
@@ -119,14 +125,13 @@ data class VolumeSchedule(
                     )
                 }
             } else {
-                // Migrate legacy single-stream rule cleanly
                 val legacyStream = obj.optString("stream", AudioStreamType.RINGTONE.key)
                 val legacyPct = obj.optInt("percentage", 100).coerceIn(0, 100)
                 AudioStreamType.entries.forEach { st ->
-                    if (st.key.equals(legacyStream, ignoreCase = true)) {
-                        parsedStreams[st.key] = StreamRuleConfig(true, legacyPct)
+                    parsedStreams[st.key] = if (st.key.equals(legacyStream, ignoreCase = true)) {
+                        StreamRuleConfig(true, legacyPct)
                     } else {
-                        parsedStreams[st.key] = StreamRuleConfig(false, 70)
+                        StreamRuleConfig(false, 70)
                     }
                 }
             }
@@ -140,6 +145,7 @@ data class VolumeSchedule(
                 enabled = obj.optBoolean("enabled", true),
                 nextTriggerAt = obj.optLong("nextTriggerAt", 0L),
                 lastExecutedAt = obj.optLong("lastExecutedAt", 0L),
+                lastExecutedSlotMillis = obj.optLong("lastExecutedSlotMillis", 0L),
                 lastExecutionSuccess = obj.optBoolean("lastExecutionSuccess", true),
                 lastExecutionMessage = obj.optString("lastExecutionMessage", "")
             )
@@ -152,6 +158,7 @@ data class VolumeApplyResult(
     val appliedExactTarget: Boolean,
     val stream: String,
     val requestedPercentage: Int,
+    val indexBefore: Int,
     val targetIndex: Int,
     val actualIndex: Int,
     val actualPercentage: Int,
@@ -159,6 +166,8 @@ data class VolumeApplyResult(
     val maxIndex: Int,
     val dndBlocked: Boolean,
     val fixedVolume: Boolean,
+    val streamUnavailable: Boolean,
+    val failureReason: String,
     val message: String
 ) {
     fun toJson(): JSONObject {
@@ -167,6 +176,7 @@ data class VolumeApplyResult(
             put("appliedExactTarget", appliedExactTarget)
             put("stream", stream)
             put("requestedPercentage", requestedPercentage)
+            put("indexBefore", indexBefore)
             put("targetIndex", targetIndex)
             put("actualIndex", actualIndex)
             put("actualPercentage", actualPercentage)
@@ -174,7 +184,54 @@ data class VolumeApplyResult(
             put("maxIndex", maxIndex)
             put("dndBlocked", dndBlocked)
             put("fixedVolume", fixedVolume)
+            put("streamUnavailable", streamUnavailable)
+            put("failureReason", failureReason)
             put("message", message)
+        }
+    }
+}
+
+data class StreamExecutionDetail(
+    val stream: String,
+    val requestedPercentage: Int,
+    val indexBefore: Int,
+    val targetIndex: Int,
+    val indexAfter: Int,
+    val minIndex: Int,
+    val maxIndex: Int,
+    val actualPercentage: Int,
+    val success: Boolean,
+    val failureReason: String
+) {
+    fun toJson(): JSONObject {
+        return JSONObject().apply {
+            put("stream", stream)
+            put("requestedPercentage", requestedPercentage)
+            put("indexBefore", indexBefore)
+            put("targetIndex", targetIndex)
+            put("indexAfter", indexAfter)
+            put("minIndex", minIndex)
+            put("maxIndex", maxIndex)
+            put("actualPercentage", actualPercentage)
+            put("success", success)
+            put("failureReason", failureReason)
+        }
+    }
+
+    companion object {
+        fun fromJson(obj: JSONObject): StreamExecutionDetail {
+            return StreamExecutionDetail(
+                stream = obj.optString("stream", ""),
+                requestedPercentage = obj.optInt("requestedPercentage", 0),
+                indexBefore = obj.optInt("indexBefore", 0),
+                targetIndex = obj.optInt("targetIndex", 0),
+                indexAfter = obj.optInt("indexAfter", 0),
+                minIndex = obj.optInt("minIndex", 0),
+                maxIndex = obj.optInt("maxIndex", 0),
+                actualPercentage = obj.optInt("actualPercentage", 0),
+                success = obj.optBoolean("success", false),
+                failureReason = obj.optString("failureReason", "")
+            )
         }
     }
 }
@@ -182,6 +239,7 @@ data class VolumeApplyResult(
 data class StreamTestResult(
     val stream: String,
     val requestedPercentage: Int,
+    val indexBefore: Int,
     val targetIndex: Int,
     val actualIndex: Int,
     val minIndex: Int,
@@ -195,6 +253,7 @@ data class StreamTestResult(
     val ringerMode: String,
     val dndBlocked: Boolean,
     val fixedVolume: Boolean,
+    val failureReason: String,
     val source: String,
     val timestamp: Long,
     val message: String
@@ -203,6 +262,7 @@ data class StreamTestResult(
         return JSONObject().apply {
             put("stream", stream)
             put("requestedPercentage", requestedPercentage)
+            put("indexBefore", indexBefore)
             put("targetIndex", targetIndex)
             put("actualIndex", actualIndex)
             put("minIndex", minIndex)
@@ -216,6 +276,7 @@ data class StreamTestResult(
             put("ringerMode", ringerMode)
             put("dndBlocked", dndBlocked)
             put("fixedVolume", fixedVolume)
+            put("failureReason", failureReason)
             put("source", source)
             put("timestamp", timestamp)
             put("message", message)
@@ -227,6 +288,7 @@ data class StreamTestResult(
             return StreamTestResult(
                 stream = obj.optString("stream", ""),
                 requestedPercentage = obj.optInt("requestedPercentage", 0),
+                indexBefore = obj.optInt("indexBefore", 0),
                 targetIndex = obj.optInt("targetIndex", 0),
                 actualIndex = obj.optInt("actualIndex", 0),
                 minIndex = obj.optInt("minIndex", 0),
@@ -240,6 +302,7 @@ data class StreamTestResult(
                 ringerMode = obj.optString("ringerMode", "normal"),
                 dndBlocked = obj.optBoolean("dndBlocked", false),
                 fixedVolume = obj.optBoolean("fixedVolume", false),
+                failureReason = obj.optString("failureReason", ""),
                 source = obj.optString("source", "FOREGROUND_TEST"),
                 timestamp = obj.optLong("timestamp", 0L),
                 message = obj.optString("message", "")
@@ -251,45 +314,74 @@ data class StreamTestResult(
 data class ExecutionLogEntry(
     val id: String,
     val timestamp: Long,
-    val source: String, // SCHEDULE | BACKGROUND_TEST_ALARM | MANUAL | FOREGROUND_TEST | BOOT_RESTORE
-    val scheduleId: String,
+    val source: String, // SCHEDULE | IMMEDIATE_PAST_TIME | BACKGROUND_TEST_ALARM | FOREGROUND_TEST | MANUAL | BOOT_RESTORE | ALARM_CANCELED | RULE_SKIPPED
+    val ruleId: String,
+    val ruleName: String,
+    val scheduledTime: String,
     val stream: String,
     val requestedPercentage: Int,
+    val indexBefore: Int,
     val actualIndex: Int,
     val maxIndex: Int,
     val actualPercentage: Int,
     val success: Boolean,
+    val failureReason: String,
+    val streamsAliasedNote: String = "",
+    val streamResults: List<StreamExecutionDetail> = emptyList(),
     val message: String
 ) {
     fun toJson(): JSONObject {
+        val detailsArr = JSONArray()
+        streamResults.forEach { detailsArr.put(it.toJson()) }
         return JSONObject().apply {
             put("id", id)
             put("timestamp", timestamp)
             put("source", source)
-            put("scheduleId", scheduleId)
+            put("ruleId", ruleId)
+            put("scheduleId", ruleId)
+            put("ruleName", ruleName)
+            put("scheduledTime", scheduledTime)
             put("stream", stream)
             put("requestedPercentage", requestedPercentage)
+            put("indexBefore", indexBefore)
             put("actualIndex", actualIndex)
             put("maxIndex", maxIndex)
             put("actualPercentage", actualPercentage)
             put("success", success)
+            put("failureReason", failureReason)
+            put("streamsAliasedNote", streamsAliasedNote)
+            put("streamResults", detailsArr)
             put("message", message)
         }
     }
 
     companion object {
         fun fromJson(obj: JSONObject): ExecutionLogEntry {
+            val details = mutableListOf<StreamExecutionDetail>()
+            val arr = obj.optJSONArray("streamResults")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val item = arr.optJSONObject(i) ?: continue
+                    details.add(StreamExecutionDetail.fromJson(item))
+                }
+            }
             return ExecutionLogEntry(
                 id = obj.optString("id"),
                 timestamp = obj.optLong("timestamp", 0L),
                 source = obj.optString("source", "MANUAL"),
-                scheduleId = obj.optString("scheduleId", ""),
+                ruleId = obj.optString("ruleId", obj.optString("scheduleId", "")),
+                ruleName = obj.optString("ruleName", ""),
+                scheduledTime = obj.optString("scheduledTime", ""),
                 stream = obj.optString("stream", ""),
                 requestedPercentage = obj.optInt("requestedPercentage", 0),
+                indexBefore = obj.optInt("indexBefore", 0),
                 actualIndex = obj.optInt("actualIndex", 0),
                 maxIndex = obj.optInt("maxIndex", 0),
                 actualPercentage = obj.optInt("actualPercentage", 0),
                 success = obj.optBoolean("success", false),
+                failureReason = obj.optString("failureReason", ""),
+                streamsAliasedNote = obj.optString("streamsAliasedNote", ""),
+                streamResults = details,
                 message = obj.optString("message", "")
             )
         }

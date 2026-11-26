@@ -30,6 +30,7 @@ export interface VolumeSchedule {
   enabled: boolean;
   nextTriggerAt: number;
   lastExecutedAt: number;
+  lastExecutedSlotMillis?: number;
   lastExecutionSuccess: boolean;
   lastExecutionMessage: string;
 }
@@ -40,24 +41,47 @@ export interface BootRestoreInfo {
   lastBootRestoredCount: number;
 }
 
+export interface StreamExecutionDetail {
+  stream: AudioStreamKey | string;
+  requestedPercentage: number;
+  indexBefore: number;
+  targetIndex: number;
+  indexAfter: number;
+  minIndex: number;
+  maxIndex: number;
+  actualPercentage: number;
+  success: boolean;
+  failureReason: string;
+}
+
 export interface ExecutionLogEntry {
   id: string;
   timestamp: number;
   source:
     | 'SCHEDULE'
+    | 'IMMEDIATE_PAST_TIME'
     | 'BACKGROUND_TEST_ALARM'
     | 'MANUAL'
     | 'FOREGROUND_TEST'
     | 'BOOT_RESTORE'
+    | 'ALARM_CANCELED'
+    | 'RULE_SKIPPED'
     | 'SYSTEM_EVENT'
     | string;
+  ruleId?: string;
   scheduleId: string;
+  ruleName?: string;
+  scheduledTime?: string;
   stream: string;
   requestedPercentage: number;
+  indexBefore?: number;
   actualIndex: number;
   maxIndex: number;
   actualPercentage: number;
   success: boolean;
+  failureReason?: string;
+  streamsAliasedNote?: string;
+  streamResults?: StreamExecutionDetail[];
   message: string;
 }
 
@@ -71,6 +95,7 @@ export interface DeviceInfo {
 export interface StreamTestResult {
   stream: AudioStreamKey | string;
   requestedPercentage: number;
+  indexBefore?: number;
   targetIndex: number;
   actualIndex: number;
   minIndex: number;
@@ -84,6 +109,7 @@ export interface StreamTestResult {
   ringerMode: string;
   dndBlocked: boolean;
   fixedVolume: boolean;
+  failureReason?: string;
   source: string;
   timestamp: number;
   message: string;
@@ -96,6 +122,8 @@ export interface VolumeSettingsResponse {
   audioMode: string;
   isVolumeFixed: boolean;
   isDoNotDisturbActive: boolean;
+  streamsAliased?: boolean;
+  streamsAliasedNote?: string;
   schedulerEnabled: boolean;
   schedules: VolumeSchedule[];
   nextScheduledChange: VolumeSchedule | null;
@@ -110,6 +138,7 @@ export interface VolumeApplyResult {
   appliedExactTarget: boolean;
   stream: string;
   requestedPercentage: number;
+  indexBefore?: number;
   targetIndex: number;
   actualIndex: number;
   actualPercentage: number;
@@ -117,6 +146,8 @@ export interface VolumeApplyResult {
   maxIndex: number;
   dndBlocked: boolean;
   fixedVolume: boolean;
+  streamUnavailable?: boolean;
+  failureReason?: string;
   message: string;
 }
 
@@ -135,6 +166,7 @@ export interface ScheduleVolumeChangeResponse {
   scheduled: boolean;
   exact: boolean;
   mode: 'exact' | 'inexact_fallback' | 'disabled' | 'web_preview';
+  executedImmediately?: boolean;
   message: string;
 }
 
@@ -230,6 +262,7 @@ export interface VolumeSchedulerPluginInterface {
     success: boolean;
     schedule: VolumeSchedule;
     mode: string;
+    executedImmediately?: boolean;
     message: string;
   }>;
   enableScheduler(): Promise<SchedulerToggleResponse>;

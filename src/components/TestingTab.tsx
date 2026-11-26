@@ -79,9 +79,11 @@ const TestResultCard: React.FC<{ title: string; result: StreamTestResult }> = ({
           <span className="font-semibold">{result.requestedPercentage}%</span>
         </div>
         <div>
-          <span className="opacity-70 block">Actual Index</span>
+          <span className="opacity-70 block">Step Change</span>
           <span className="font-semibold">
-            {result.actualIndex} / {result.maxIndex}
+            {result.indexBefore !== undefined
+              ? `${result.indexBefore} -> ${result.actualIndex} / ${result.maxIndex}`
+              : `${result.actualIndex} / ${result.maxIndex}`}
           </span>
         </div>
         <div>
@@ -116,6 +118,11 @@ const TestResultCard: React.FC<{ title: string; result: StreamTestResult }> = ({
           {result.callSessionActive
             ? 'Active call/communication session detected.'
             : 'No call session active — verify actual call loudness during a live phone or VoIP call.'}
+        </p>
+      )}
+      {result.failureReason && (
+        <p className="text-[11px] text-rose-300 leading-relaxed">
+          Reason: {result.failureReason}
         </p>
       )}
     </div>
@@ -529,34 +536,111 @@ export const TestingTab: React.FC<TestingTabProps> = ({
           </p>
         ) : (
           <div className="divide-y divide-slate-800/80">
-            {logs.slice(0, 15).map((entry) => (
-              <div key={entry.id} className="py-3 flex items-start justify-between gap-3 text-xs">
-                <div className="min-w-0 space-y-0.5">
-                  <div className="flex items-center gap-2 font-medium text-slate-200">
-                    {entry.success ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    ) : (
-                      <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                    )}
-                    <span>{entry.source}</span>
-                    <span className="text-slate-600" aria-hidden="true">·</span>
-                    <span className="text-cyan-300">{getStreamLabel(entry.stream)}</span>
-                    {entry.maxIndex > 0 && (
-                      <>
-                        <span className="text-slate-600" aria-hidden="true">·</span>
-                        <span className="font-mono-tabular text-slate-300">
-                          {entry.actualIndex}/{entry.maxIndex} ({entry.actualPercentage}%)
-                        </span>
-                      </>
-                    )}
+            {logs.slice(0, 15).map((entry) => {
+              const ruleLabel = entry.ruleName || (entry.ruleId ? `Rule ${entry.ruleId}` : '');
+              const details = entry.streamResults ?? [];
+              return (
+                <div key={entry.id} className="py-3.5 space-y-2 text-xs">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-medium text-slate-200">
+                        {entry.success ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        ) : (
+                          <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        )}
+                        <span>{entry.source}</span>
+                        {ruleLabel && (
+                          <>
+                            <span className="text-slate-600" aria-hidden="true">·</span>
+                            <span className="text-slate-100">{ruleLabel}</span>
+                          </>
+                        )}
+                        {entry.scheduledTime && (
+                          <>
+                            <span className="text-slate-600" aria-hidden="true">·</span>
+                            <span className="font-mono-tabular text-cyan-300">
+                              Scheduled {entry.scheduledTime}
+                            </span>
+                          </>
+                        )}
+                        {details.length === 0 && entry.stream && entry.stream !== 'none' && entry.stream !== 'system' && (
+                          <>
+                            <span className="text-slate-600" aria-hidden="true">·</span>
+                            <span className="text-cyan-300">{getStreamLabel(entry.stream)}</span>
+                          </>
+                        )}
+                        {details.length === 0 && entry.maxIndex > 0 && (
+                          <>
+                            <span className="text-slate-600" aria-hidden="true">·</span>
+                            <span className="font-mono-tabular text-slate-300">
+                              {entry.indexBefore !== undefined ? `${entry.indexBefore} -> ` : ''}
+                              {entry.actualIndex}/{entry.maxIndex} ({entry.actualPercentage}% for {entry.requestedPercentage}%)
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      {entry.ruleId && (
+                        <p className="text-[11px] font-mono-tabular text-slate-500">
+                          Rule ID: {entry.ruleId}
+                        </p>
+                      )}
+
+                      <p className="text-slate-400 leading-relaxed">{entry.message}</p>
+
+                      {entry.failureReason && (
+                        <p className="text-rose-300 leading-relaxed">
+                          Failure reason: {entry.failureReason}
+                        </p>
+                      )}
+
+                      {entry.streamsAliasedNote && (
+                        <p className="text-amber-300 leading-relaxed">
+                          {entry.streamsAliasedNote}
+                        </p>
+                      )}
+                    </div>
+
+                    <span className="font-mono-tabular text-slate-500 shrink-0 text-right">
+                      {formatTimestamp(entry.timestamp)}
+                    </span>
                   </div>
-                  <p className="text-slate-400 leading-relaxed">{entry.message}</p>
+
+                  {details.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {details.map((d) => (
+                        <div
+                          key={`${entry.id}-${d.stream}`}
+                          className={`rounded-lg border px-3 py-2 font-mono-tabular text-[11px] space-y-0.5 ${
+                            d.success
+                              ? 'bg-[#0B111A] border-slate-800 text-slate-300'
+                              : 'bg-rose-500/5 border-rose-500/30 text-rose-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-sans font-semibold text-slate-100">
+                              {getStreamLabel(d.stream)}
+                            </span>
+                            <span>
+                              Req {d.requestedPercentage}% · Act {d.actualPercentage}%
+                            </span>
+                          </div>
+                          <div className="text-slate-400">
+                            Index: {d.indexBefore} -&gt; {d.indexAfter}/{d.maxIndex} (target {d.targetIndex}, min {d.minIndex})
+                          </div>
+                          {d.failureReason && (
+                            <div className="font-sans text-rose-300 leading-snug">
+                              {d.failureReason}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <span className="font-mono-tabular text-slate-500 shrink-0 text-right">
-                  {formatTimestamp(entry.timestamp)}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

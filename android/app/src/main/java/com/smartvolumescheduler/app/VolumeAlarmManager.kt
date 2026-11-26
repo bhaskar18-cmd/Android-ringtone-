@@ -13,6 +13,8 @@ data class AlarmDispatchResult(
     val exact: Boolean,
     val nextTriggerAt: Long,
     val mode: String,
+    val executedImmediately: Boolean = false,
+    val executionOutcome: RuleExecutionOutcome? = null,
     val message: String
 )
 
@@ -21,6 +23,7 @@ object VolumeAlarmManager {
     const val ACTION_EXECUTE_SCHEDULE = "com.smartvolumescheduler.app.ACTION_EXECUTE_SCHEDULE"
     const val ACTION_EXECUTE_TEST_ALARM = "com.smartvolumescheduler.app.ACTION_EXECUTE_TEST_ALARM"
     const val EXTRA_SCHEDULE_ID = "extra_schedule_id"
+    const val EXTRA_SLOT_MILLIS = "extra_slot_millis"
     const val EXTRA_IS_TEST = "extra_is_test"
     const val EXTRA_TEST_STREAM = "extra_test_stream"
     const val EXTRA_TEST_PERCENTAGE = "extra_test_percentage"
@@ -34,14 +37,42 @@ object VolumeAlarmManager {
         }
     }
 
+    private fun parseHourMinute(time: String): Pair<Int, Int> {
+        val parts = time.split(":")
+        val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: 8
+        val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+        return hour to minute
+    }
+
+    fun getPassedTodaySlotMillis(
+        time: String,
+        days: List<Int>,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Long? {
+        val (hour, minute) = parseHourMinute(time)
+        val activeDays = if (days.isEmpty()) setOf(0, 1, 2, 3, 4, 5, 6) else days.toSet()
+        val nowCal = Calendar.getInstance().apply { timeInMillis = nowMillis }
+        val todayDay = nowCal.get(Calendar.DAY_OF_WEEK) - 1 // Sun=0 .. Sat=6
+        if (!activeDays.contains(todayDay)) {
+            return null
+        }
+
+        val todaySlot = (nowCal.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        return if (todaySlot <= nowMillis) todaySlot else null
+    }
+
     fun computeNextTriggerMillis(
         time: String,
         days: List<Int>,
         nowMillis: Long = System.currentTimeMillis()
     ): Long {
-        val parts = time.split(":")
-        val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: 8
-        val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+        val (hour, minute) = parseHourMinute(time)
         val activeDays = if (days.isEmpty()) setOf(0, 1, 2, 3, 4, 5, 6) else days.toSet()
 
         val base = Calendar.getInstance().apply {
@@ -64,21 +95,26 @@ object VolumeAlarmManager {
         return nowMillis + 24 * 60 * 60 * 1000L
     }
 
+    private fun requestCodeForRule(scheduleId: String): Int {
+        return scheduleId.hashCode() and 0x7FFFFFFF
+    }
+
     private fun buildSchedulePendingIntent(
         context: Context,
         scheduleId: String,
-        flags: Int
-    ): PendingIntent {
+        flags: Int,
+        slotMillis: Long = 0L
+    ): PendingIntent? {
         val intent = Intent(context, VolumeAlarmReceiver::class.java).apply {
             action = ACTION_EXECUTE_SCHEDULE
             data = Uri.parse("smartvolume://schedule/$scheduleId")
             putExtra(EXTRA_SCHEDULE_ID, scheduleId)
+            putExtra(EXTRA_SLOT_MILLIS, slotMillis)
             putExtra(EXTRA_IS_TEST, false)
         }
-        val requestCode = scheduleId.hashCode()
         return PendingIntent.getBroadcast(
             context.applicationContext,
-            requestCode,
+            requestCodeForRule(scheduleId),
             intent,
             flags or PendingIntent.FLAG_IMMUTABLE
         )
@@ -98,8 +134,10 @@ object VolumeAlarmManager {
     }
 
     fun scheduleSingle(context: Context, schedule: VolumeSchedule): AlarmDispatchResult {
+        // Always cancel any existing alarm for this rule ID first to prevent duplicates
+        cancelSchedule(context, schedule.id)
+
         if (!VolumeSchedulerStorage.isSchedulerEnabled(context) || !schedule.enabled) {
-            cancelSchedule(context, schedule.id)
             val updated = schedule.copy(nextTriggerAt = 0L)
             VolumeSchedulerStorage.upsertSchedule(context, updated)
             return AlarmDispatchResult(
@@ -107,16 +145,24 @@ object VolumeAlarmManager {
                 exact = false,
                 nextTriggerAt = 0L,
                 mode = "disabled",
-                message = "Schedule saved in disabled state."
+                message = if (!schedule.enabled) "Rule disabled; alarm canceled." else "Scheduler paused; alarm canceled."
             )
         }
 
-        val triggerAt = computeNextTriggerMillis(schedule.time, schedule.days)
+        val afterMillis = maxOf(System.currentTimeMillis(), schedule.lastExecutedSlotMillis + 1000L)
+        val triggerAt = computeNextTriggerMillis(schedule.time, schedule.days, afterMillis)
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pendingIntent = buildSchedulePendingIntent(
-            context,
-            schedule.id,
-            PendingIntent.FLAG_UPDATE_CURRENT
+            context = context,
+            scheduleId = schedule.id,
+            flags = PendingIntent.FLAG_UPDATE_CURRENT,
+            slotMillis = triggerAt
+        ) ?: return AlarmDispatchResult(
+            scheduled = false,
+            exact = false,
+            nextTriggerAt = 0L,
+            mode = "error",
+            message = "Failed to create PendingIntent for schedule ${schedule.id}."
         )
 
         val exactAllowed = canScheduleExactAlarms(context)
@@ -139,7 +185,7 @@ object VolumeAlarmManager {
         val msg = if (usedExact) {
             "Scheduled exact alarm via AlarmManager."
         } else {
-            "Exact alarm permission not granted; scheduled inexact Doze-safe fallback alarm."
+            "Exact alarm permission missing; scheduled inexact Doze-safe fallback alarm."
         }
 
         return AlarmDispatchResult(
@@ -148,6 +194,62 @@ object VolumeAlarmManager {
             nextTriggerAt = triggerAt,
             mode = mode,
             message = msg
+        )
+    }
+
+    fun applyPastTimeIfNeededAndSchedule(
+        context: Context,
+        schedule: VolumeSchedule,
+        forceImmediateIfPassed: Boolean
+    ): AlarmDispatchResult {
+        cancelSchedule(context, schedule.id)
+
+        if (!VolumeSchedulerStorage.isSchedulerEnabled(context) || !schedule.enabled) {
+            val updated = schedule.copy(nextTriggerAt = 0L)
+            VolumeSchedulerStorage.upsertSchedule(context, updated)
+            return AlarmDispatchResult(
+                scheduled = false,
+                exact = false,
+                nextTriggerAt = 0L,
+                mode = "disabled",
+                message = if (!schedule.enabled) "Rule saved in disabled state." else "Rule saved while master scheduler is paused."
+            )
+        }
+
+        val now = System.currentTimeMillis()
+        val passedSlotMillis = getPassedTodaySlotMillis(schedule.time, schedule.days, now)
+        val shouldExecuteNow = passedSlotMillis != null &&
+            (forceImmediateIfPassed || schedule.lastExecutedSlotMillis != passedSlotMillis)
+
+        var workingSchedule = schedule
+        var outcome: RuleExecutionOutcome? = null
+
+        if (shouldExecuteNow && passedSlotMillis != null) {
+            outcome = VolumeRuleExecutor.executeRule(
+                context = context,
+                schedule = workingSchedule,
+                source = "IMMEDIATE_PAST_TIME",
+                slotMillis = passedSlotMillis
+            )
+            workingSchedule = outcome.updatedSchedule
+        }
+
+        val nextDispatch = scheduleSingle(context, workingSchedule)
+        val combinedMessage = if (outcome != null) {
+            val immediateStatus = if (outcome.allSucceeded) {
+                "Rule time (${schedule.time}) already passed today — applied immediately (${outcome.summaryMessage})."
+            } else {
+                "Rule time (${schedule.time}) already passed today — attempted immediate execution with errors (${outcome.summaryMessage})."
+            }
+            "$immediateStatus Next occurrence: ${nextDispatch.message}"
+        } else {
+            nextDispatch.message
+        }
+
+        return nextDispatch.copy(
+            executedImmediately = outcome != null,
+            executionOutcome = outcome,
+            message = combinedMessage
         )
     }
 
@@ -227,7 +329,7 @@ object VolumeAlarmManager {
             message = if (usedExact) {
                 "Test alarm scheduled in ${delaySec}s via exact AlarmManager."
             } else {
-                "Test alarm scheduled in ${delaySec}s using inexact AlarmManager fallback (OS may delay delivery slightly)."
+                "Exact alarm permission missing; test alarm scheduled in ${delaySec}s using inexact AlarmManager fallback."
             }
         )
     }

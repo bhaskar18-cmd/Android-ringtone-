@@ -153,10 +153,9 @@ export const SchedulesTab: React.FC<SchedulesTabProps> = ({
                     </div>
                     {item.lastExecutedAt > 0 && (
                       <div
-                        className={`truncate mt-0.5 ${
-                          item.lastExecutionSuccess ? 'text-slate-500' : 'text-rose-400'
+                        className={`mt-0.5 leading-snug break-words ${
+                          item.lastExecutionSuccess ? 'text-slate-400' : 'text-rose-400'
                         }`}
-                        title={item.lastExecutionMessage}
                       >
                         Last run: {formatTimestamp(item.lastExecutedAt)}
                         {item.lastExecutionMessage ? ` · ${item.lastExecutionMessage}` : ''}

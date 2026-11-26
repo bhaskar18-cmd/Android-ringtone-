@@ -35,20 +35,48 @@ object VolumeController {
         }
     }
 
+    fun computeTargetIndex(percentage: Int, minIndex: Int, maxIndex: Int): Int {
+        val clampedPct = percentage.coerceIn(0, 100)
+        val span = (maxIndex - minIndex).coerceAtLeast(0)
+        val computed = minIndex + ((clampedPct / 100.0) * span).roundToInt()
+        return computed.coerceIn(minIndex, maxIndex)
+    }
+
+    fun computeAchievablePercentage(index: Int, minIndex: Int, maxIndex: Int): Int {
+        val span = maxIndex - minIndex
+        if (span <= 0) return 100
+        return (((index - minIndex).toDouble() / span.toDouble()) * 100.0)
+            .roundToInt()
+            .coerceIn(0, 100)
+    }
+
     fun getStreamSnapshot(context: Context, stream: AudioStreamType): JSONObject {
         val am = getAudioManager(context)
-        val current = am.getStreamVolume(stream.androidStream)
-        val min = getMinVolume(am, stream.androidStream)
-        val max = am.getStreamMaxVolume(stream.androidStream).coerceAtLeast(1)
-        val pct = ((current.toDouble() / max.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+        return try {
+            val current = am.getStreamVolume(stream.androidStream)
+            val min = getMinVolume(am, stream.androidStream)
+            val max = am.getStreamMaxVolume(stream.androidStream).coerceAtLeast(min.coerceAtLeast(1))
+            val pct = computeAchievablePercentage(current, min, max)
 
-        return JSONObject().apply {
-            put("stream", stream.key)
-            put("label", stream.label)
-            put("currentIndex", current)
-            put("minIndex", min)
-            put("maxIndex", max)
-            put("percentage", pct)
+            JSONObject().apply {
+                put("stream", stream.key)
+                put("label", stream.label)
+                put("currentIndex", current)
+                put("minIndex", min)
+                put("maxIndex", max)
+                put("percentage", pct)
+                put("available", true)
+            }
+        } catch (_: Exception) {
+            JSONObject().apply {
+                put("stream", stream.key)
+                put("label", stream.label)
+                put("currentIndex", 0)
+                put("minIndex", 0)
+                put("maxIndex", 0)
+                put("percentage", 0)
+                put("available", false)
+            }
         }
     }
 
@@ -87,6 +115,7 @@ object VolumeController {
                 appliedExactTarget = false,
                 stream = streamKey,
                 requestedPercentage = requestedPercentage,
+                indexBefore = 0,
                 targetIndex = 0,
                 actualIndex = 0,
                 actualPercentage = 0,
@@ -94,67 +123,158 @@ object VolumeController {
                 maxIndex = 0,
                 dndBlocked = false,
                 fixedVolume = false,
+                streamUnavailable = true,
+                failureReason = "Unsupported audio stream: $streamKey",
                 message = "Unsupported audio stream: $streamKey"
             )
 
         val clampedPct = requestedPercentage.coerceIn(0, 100)
         val am = getAudioManager(context)
         val nm = getNotificationManager(context)
-        val minIndex = getMinVolume(am, stream.androidStream)
-        val maxIndex = am.getStreamMaxVolume(stream.androidStream).coerceAtLeast(1)
 
-        if (am.isVolumeFixed) {
-            val actual = am.getStreamVolume(stream.androidStream)
-            val actualPct = ((actual.toDouble() / maxIndex.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+        val minIndex: Int
+        val maxIndex: Int
+        val indexBefore: Int
+        try {
+            minIndex = getMinVolume(am, stream.androidStream)
+            maxIndex = am.getStreamMaxVolume(stream.androidStream)
+            indexBefore = am.getStreamVolume(stream.androidStream)
+            if (maxIndex <= 0 || maxIndex < minIndex) {
+                return VolumeApplyResult(
+                    success = false,
+                    appliedExactTarget = false,
+                    stream = stream.key,
+                    requestedPercentage = clampedPct,
+                    indexBefore = indexBefore,
+                    targetIndex = indexBefore,
+                    actualIndex = indexBefore,
+                    actualPercentage = 0,
+                    minIndex = minIndex,
+                    maxIndex = maxIndex,
+                    dndBlocked = false,
+                    fixedVolume = false,
+                    streamUnavailable = true,
+                    failureReason = "Volume stream unavailable (${stream.label} reported maxIndex=$maxIndex).",
+                    message = "${stream.label} stream is unavailable on this device."
+                )
+            }
+        } catch (ex: Exception) {
             return VolumeApplyResult(
                 success = false,
                 appliedExactTarget = false,
                 stream = stream.key,
                 requestedPercentage = clampedPct,
-                targetIndex = actual,
-                actualIndex = actual,
+                indexBefore = 0,
+                targetIndex = 0,
+                actualIndex = 0,
+                actualPercentage = 0,
+                minIndex = 0,
+                maxIndex = 0,
+                dndBlocked = false,
+                fixedVolume = false,
+                streamUnavailable = true,
+                failureReason = "Volume stream unavailable: ${ex.message ?: "unsupported"}",
+                message = "Unable to query ${stream.label} stream on this device."
+            )
+        }
+
+        if (am.isVolumeFixed) {
+            val actualPct = computeAchievablePercentage(indexBefore, minIndex, maxIndex)
+            val reason = "Device reports fixed volume mode; Android AudioManager refuses stream adjustments."
+            return VolumeApplyResult(
+                success = false,
+                appliedExactTarget = false,
+                stream = stream.key,
+                requestedPercentage = clampedPct,
+                indexBefore = indexBefore,
+                targetIndex = indexBefore,
+                actualIndex = indexBefore,
                 actualPercentage = actualPct,
                 minIndex = minIndex,
                 maxIndex = maxIndex,
                 dndBlocked = false,
                 fixedVolume = true,
-                message = "Device reports fixed volume mode; Android AudioManager refuses stream adjustments."
+                streamUnavailable = false,
+                failureReason = reason,
+                message = reason
             )
         }
 
-        // Map percentage directly to Android's 0..maxIndex range and clamp to [minIndex, maxIndex]
-        val rawTargetIndex = ((clampedPct / 100.0) * maxIndex).roundToInt()
-        val targetIndex = rawTargetIndex.coerceIn(minIndex, maxIndex)
+        val targetIndex = computeTargetIndex(clampedPct, minIndex, maxIndex)
         val flags = if (showSystemUi) AudioManager.FLAG_SHOW_UI else 0
 
+        // Snapshot Ring/Notification before changing either so we can detect OS stream aliasing honestly
+        val ringBefore = if (stream == AudioStreamType.NOTIFICATION) {
+            try { am.getStreamVolume(AudioManager.STREAM_RING) } catch (_: Exception) { -1 }
+        } else -1
+        val notifBefore = if (stream == AudioStreamType.RINGTONE) {
+            try { am.getStreamVolume(AudioManager.STREAM_NOTIFICATION) } catch (_: Exception) { -1 }
+        } else -1
+
         return try {
-            // If setting Ringtone > 0 while device is in silent/vibrate, restore normal ringer mode first
-            if (stream == AudioStreamType.RINGTONE && targetIndex > 0 && am.ringerMode != AudioManager.RINGER_MODE_NORMAL) {
+            if ((stream == AudioStreamType.RINGTONE || stream == AudioStreamType.NOTIFICATION) &&
+                targetIndex > 0 &&
+                am.ringerMode != AudioManager.RINGER_MODE_NORMAL
+            ) {
                 am.ringerMode = AudioManager.RINGER_MODE_NORMAL
             }
 
             am.setStreamVolume(stream.androidStream, targetIndex, flags)
 
             val actualIndex = am.getStreamVolume(stream.androidStream)
-            val actualPct = ((actualIndex.toDouble() / maxIndex.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+            val actualPct = computeAchievablePercentage(actualIndex, minIndex, maxIndex)
             val appliedToHardware = (actualIndex == targetIndex)
-            val exactRequested = appliedToHardware && (rawTargetIndex == targetIndex)
+            val exactPctMatch = (actualPct == clampedPct)
             val dndAccessGranted = nm.isNotificationPolicyAccessGranted
+
+            // Detect OS-level Ringtone <-> Notification aliasing
+            if (stream == AudioStreamType.RINGTONE && notifBefore >= 0 && actualIndex != indexBefore) {
+                val notifAfter = try { am.getStreamVolume(AudioManager.STREAM_NOTIFICATION) } catch (_: Exception) { -1 }
+                if (notifAfter >= 0 && notifAfter != notifBefore) {
+                    VolumeSchedulerStorage.setStreamsAliased(
+                        context,
+                        true,
+                        "Changing Ringtone also moved Notification ($notifBefore -> $notifAfter); Android links these streams on this device."
+                    )
+                }
+            } else if (stream == AudioStreamType.NOTIFICATION && ringBefore >= 0 && actualIndex != indexBefore) {
+                val ringAfter = try { am.getStreamVolume(AudioManager.STREAM_RING) } catch (_: Exception) { -1 }
+                if (ringAfter >= 0 && ringAfter != ringBefore) {
+                    VolumeSchedulerStorage.setStreamsAliased(
+                        context,
+                        true,
+                        "Changing Notification also moved Ringtone ($ringBefore -> $ringAfter); Android links these streams on this device."
+                    )
+                }
+            }
+
+            val failureReason = if (!appliedToHardware) {
+                if (!dndAccessGranted && (stream == AudioStreamType.RINGTONE || stream == AudioStreamType.NOTIFICATION)) {
+                    "Android restriction: Do Not Disturb Policy Access not granted or stream clamped at $actualIndex/$maxIndex."
+                } else {
+                    "Android AudioManager clamped or rejected target step $targetIndex/$maxIndex; actual index remained $actualIndex/$maxIndex ($actualPct%)."
+                }
+            } else {
+                ""
+            }
 
             val note = when {
                 !appliedToHardware ->
-                    "Requested ${stream.label} index $targetIndex/$maxIndex ($clampedPct%), but Android kept level at $actualIndex/$maxIndex ($actualPct%)."
-                rawTargetIndex < minIndex ->
-                    "Applied minimum supported level $actualIndex/$maxIndex ($actualPct%) for ${stream.label} (Android enforces min index $minIndex)."
+                    "Requested ${stream.label} step $targetIndex/$maxIndex ($clampedPct%), but Android kept level at $actualIndex/$maxIndex ($actualPct%)."
+                minIndex > 0 ->
+                    "Applied ${stream.label} step $actualIndex/$maxIndex (range $minIndex..$maxIndex, $actualPct% achievable for $clampedPct% requested)."
+                !exactPctMatch ->
+                    "Applied ${stream.label} nearest hardware step $actualIndex/$maxIndex ($actualPct% achievable for $clampedPct% requested)."
                 else ->
-                    "Applied ${stream.label}: $actualIndex/$maxIndex ($actualPct% achieved for $clampedPct% requested)."
+                    "Applied ${stream.label}: $actualIndex/$maxIndex ($actualPct%)."
             }
 
             VolumeApplyResult(
                 success = appliedToHardware,
-                appliedExactTarget = exactRequested,
+                appliedExactTarget = appliedToHardware && exactPctMatch,
                 stream = stream.key,
                 requestedPercentage = clampedPct,
+                indexBefore = indexBefore,
                 targetIndex = targetIndex,
                 actualIndex = actualIndex,
                 actualPercentage = actualPct,
@@ -162,11 +282,13 @@ object VolumeController {
                 maxIndex = maxIndex,
                 dndBlocked = !appliedToHardware && !dndAccessGranted,
                 fixedVolume = false,
+                streamUnavailable = false,
+                failureReason = failureReason,
                 message = note
             )
         } catch (sec: SecurityException) {
-            val actualIndex = am.getStreamVolume(stream.androidStream)
-            val actualPct = ((actualIndex.toDouble() / maxIndex.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+            val actualIndex = try { am.getStreamVolume(stream.androidStream) } catch (_: Exception) { indexBefore }
+            val actualPct = computeAchievablePercentage(actualIndex, minIndex, maxIndex)
             val dndAccessGranted = nm.isNotificationPolicyAccessGranted
             val detail = if (!dndAccessGranted) {
                 "Android blocked ${stream.label} volume change because Do Not Disturb Policy Access is not granted."
@@ -178,6 +300,7 @@ object VolumeController {
                 appliedExactTarget = false,
                 stream = stream.key,
                 requestedPercentage = clampedPct,
+                indexBefore = indexBefore,
                 targetIndex = targetIndex,
                 actualIndex = actualIndex,
                 actualPercentage = actualPct,
@@ -185,16 +308,20 @@ object VolumeController {
                 maxIndex = maxIndex,
                 dndBlocked = !dndAccessGranted,
                 fixedVolume = false,
+                streamUnavailable = false,
+                failureReason = detail,
                 message = detail
             )
         } catch (ex: Exception) {
-            val actualIndex = am.getStreamVolume(stream.androidStream)
-            val actualPct = ((actualIndex.toDouble() / maxIndex.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+            val actualIndex = try { am.getStreamVolume(stream.androidStream) } catch (_: Exception) { indexBefore }
+            val actualPct = computeAchievablePercentage(actualIndex, minIndex, maxIndex)
+            val reason = "Android error changing ${stream.label}: ${ex.message ?: "unknown error"}"
             VolumeApplyResult(
                 success = false,
                 appliedExactTarget = false,
                 stream = stream.key,
                 requestedPercentage = clampedPct,
+                indexBefore = indexBefore,
                 targetIndex = targetIndex,
                 actualIndex = actualIndex,
                 actualPercentage = actualPct,
@@ -202,7 +329,9 @@ object VolumeController {
                 maxIndex = maxIndex,
                 dndBlocked = false,
                 fixedVolume = false,
-                message = "Failed to change ${stream.label}: ${ex.message ?: "unknown error"}"
+                streamUnavailable = false,
+                failureReason = reason,
+                message = reason
             )
         }
     }
@@ -216,9 +345,10 @@ object VolumeController {
     ): StreamTestResult {
         val am = getAudioManager(context)
         val targetPct = requestedPercentage ?: run {
+            val min = getMinVolume(am, stream.androidStream)
             val cur = am.getStreamVolume(stream.androidStream)
             val max = am.getStreamMaxVolume(stream.androidStream).coerceAtLeast(1)
-            ((cur.toDouble() / max.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+            computeAchievablePercentage(cur, min, max)
         }
 
         val applyResult = applyVolume(context, stream.key, targetPct, showSystemUi = false)
@@ -232,6 +362,7 @@ object VolumeController {
             return StreamTestResult(
                 stream = stream.key,
                 requestedPercentage = applyResult.requestedPercentage,
+                indexBefore = applyResult.indexBefore,
                 targetIndex = applyResult.targetIndex,
                 actualIndex = applyResult.actualIndex,
                 minIndex = applyResult.minIndex,
@@ -245,6 +376,7 @@ object VolumeController {
                 ringerMode = ringerModeStr,
                 dndBlocked = applyResult.dndBlocked,
                 fixedVolume = applyResult.fixedVolume,
+                failureReason = applyResult.failureReason,
                 source = source,
                 timestamp = System.currentTimeMillis(),
                 message = applyResult.message
@@ -254,13 +386,14 @@ object VolumeController {
         if (stream == AudioStreamType.VOICE_CALL) {
             onPlaybackComplete?.invoke()
             val msg = if (callSessionActive) {
-                "Voice Call volume set to ${applyResult.actualIndex}/${applyResult.maxIndex} (${applyResult.actualPercentage}%) during active $audioModeStr session. No notification sound was substituted."
+                "Voice Call volume set to ${applyResult.actualIndex}/${applyResult.maxIndex} (${applyResult.actualPercentage}% achievable for ${applyResult.requestedPercentage}% requested) during active $audioModeStr session."
             } else {
-                "Voice Call volume index set to ${applyResult.actualIndex}/${applyResult.maxIndex} (${applyResult.actualPercentage}%), but actual call loudness could not be verified because no call or communication audio session is active ($audioModeStr). Test during a real phone or VoIP call to verify call loudness."
+                "Voice Call volume index set to ${applyResult.actualIndex}/${applyResult.maxIndex} (${applyResult.actualPercentage}% achievable), but actual call loudness could not be verified because no call or communication audio session is active ($audioModeStr). Test during a real phone or VoIP call."
             }
             return StreamTestResult(
                 stream = stream.key,
                 requestedPercentage = applyResult.requestedPercentage,
+                indexBefore = applyResult.indexBefore,
                 targetIndex = applyResult.targetIndex,
                 actualIndex = applyResult.actualIndex,
                 minIndex = applyResult.minIndex,
@@ -274,6 +407,7 @@ object VolumeController {
                 ringerMode = ringerModeStr,
                 dndBlocked = false,
                 fixedVolume = false,
+                failureReason = if (callSessionActive) "" else "No active call or communication audio session ($audioModeStr).",
                 source = source,
                 timestamp = System.currentTimeMillis(),
                 message = msg
@@ -287,6 +421,7 @@ object VolumeController {
         return StreamTestResult(
             stream = stream.key,
             requestedPercentage = applyResult.requestedPercentage,
+            indexBefore = applyResult.indexBefore,
             targetIndex = applyResult.targetIndex,
             actualIndex = applyResult.actualIndex,
             minIndex = applyResult.minIndex,
@@ -300,6 +435,7 @@ object VolumeController {
             ringerMode = ringerModeStr,
             dndBlocked = false,
             fixedVolume = false,
+            failureReason = if (verified) "" else playbackMsg,
             source = source,
             timestamp = System.currentTimeMillis(),
             message = fullMessage
@@ -445,7 +581,6 @@ object VolumeController {
             true to "Started real $label sound playback on $label stream."
         } catch (ex: Exception) {
             releaseOnce()
-            // Fallback to Ringtone API on the exact same stream usage (never substitutes another stream)
             try {
                 val ringtone = RingtoneManager.getRingtone(context.applicationContext, uri)
                 if (ringtone != null) {
