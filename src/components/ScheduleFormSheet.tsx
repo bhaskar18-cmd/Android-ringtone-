@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import type { AudioStreamKey, ScheduleVolumeChangeParams, VolumeSchedule } from '../types/volume';
+import { createDefaultStreamsMap } from '../native/volumeScheduler';
+import type {
+  AudioStreamKey,
+  RuleStreamsMap,
+  ScheduleVolumeChangeParams,
+  VolumeSchedule,
+} from '../types/volume';
 import { STREAM_OPTIONS, WEEKDAY_LABELS, formatTime12h } from '../utils/formatters';
 
 interface ScheduleFormSheetProps {
@@ -20,8 +26,12 @@ export const ScheduleFormSheet: React.FC<ScheduleFormSheetProps> = ({
 }) => {
   const [label, setLabel] = useState('');
   const [time, setTime] = useState('08:00');
-  const [stream, setStream] = useState<AudioStreamKey>('ringtone');
-  const [percentage, setPercentage] = useState(80);
+  const [streams, setStreams] = useState<RuleStreamsMap>(() =>
+    createDefaultStreamsMap({
+      ringtone: { enabled: true, percentage: 80 },
+      notification: { enabled: true, percentage: 80 },
+    })
+  );
   const [days, setDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [enabled, setEnabled] = useState(true);
   const [error, setError] = useState('');
@@ -31,15 +41,29 @@ export const ScheduleFormSheet: React.FC<ScheduleFormSheetProps> = ({
     if (initialSchedule) {
       setLabel(initialSchedule.label);
       setTime(initialSchedule.time);
-      setStream(initialSchedule.stream);
-      setPercentage(initialSchedule.percentage);
-      setDays(initialSchedule.days.length > 0 ? initialSchedule.days : [0, 1, 2, 3, 4, 5, 6]);
+      setStreams(
+        createDefaultStreamsMap({
+          media: { ...initialSchedule.streams.media },
+          ringtone: { ...initialSchedule.streams.ringtone },
+          notification: { ...initialSchedule.streams.notification },
+          alarm: { ...initialSchedule.streams.alarm },
+          voice_call: { ...initialSchedule.streams.voice_call },
+        })
+      );
+      setDays(initialSchedule.days.length > 0 ? [...initialSchedule.days] : [0, 1, 2, 3, 4, 5, 6]);
       setEnabled(initialSchedule.enabled);
     } else {
       setLabel('');
       setTime('08:00');
-      setStream('ringtone');
-      setPercentage(80);
+      setStreams(
+        createDefaultStreamsMap({
+          media: { enabled: false, percentage: 50 },
+          ringtone: { enabled: true, percentage: 80 },
+          notification: { enabled: true, percentage: 80 },
+          alarm: { enabled: false, percentage: 80 },
+          voice_call: { enabled: false, percentage: 60 },
+        })
+      );
       setDays([0, 1, 2, 3, 4, 5, 6]);
       setEnabled(true);
     }
@@ -51,11 +75,32 @@ export const ScheduleFormSheet: React.FC<ScheduleFormSheetProps> = ({
   const toggleDay = (dayIndex: number) => {
     setDays((prev) => {
       if (prev.includes(dayIndex)) {
-        if (prev.length === 1) return prev; // keep at least 1 day selected
+        if (prev.length === 1) return prev;
         return prev.filter((d) => d !== dayIndex);
       }
       return [...prev, dayIndex].sort((a, b) => a - b);
     });
+  };
+
+  const toggleStreamEnabled = (key: AudioStreamKey) => {
+    setStreams((prev) => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        enabled: !prev[key].enabled,
+      },
+    }));
+  };
+
+  const updateStreamPercentage = (key: AudioStreamKey, pct: number) => {
+    const clamped = Math.min(100, Math.max(0, Math.round(pct)));
+    setStreams((prev) => ({
+      ...prev,
+      [key]: {
+        enabled: true,
+        percentage: clamped,
+      },
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -68,13 +113,17 @@ export const ScheduleFormSheet: React.FC<ScheduleFormSheetProps> = ({
       setError('Select at least one weekday.');
       return;
     }
+    const anyStreamEnabled = STREAM_OPTIONS.some((opt) => streams[opt.key]?.enabled);
+    if (!anyStreamEnabled) {
+      setError('Enable at least one audio stream for this rule.');
+      return;
+    }
     setError('');
     await onSave({
       id: initialSchedule?.id,
       label: label.trim(),
       time,
-      stream,
-      percentage,
+      streams,
       days,
       enabled,
     });
@@ -87,16 +136,16 @@ export const ScheduleFormSheet: React.FC<ScheduleFormSheetProps> = ({
       aria-modal="true"
       aria-labelledby="schedule-sheet-title"
     >
-      <div className="w-full sm:max-w-lg max-h-[92dvh] flex flex-col bg-[#121A26] border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full sm:max-w-xl max-h-[92dvh] flex flex-col bg-[#121A26] border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden">
         <div className="sm:hidden w-10 h-1.5 bg-slate-700 rounded-full mx-auto mt-3 shrink-0" />
 
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/80 shrink-0">
           <div>
             <h2 id="schedule-sheet-title" className="text-lg font-semibold text-slate-100">
-              {initialSchedule ? 'Edit Schedule' : 'New Volume Schedule'}
+              {initialSchedule ? 'Edit Schedule Rule' : 'New Volume Schedule'}
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Triggers automatically at {formatTime12h(time)} local time
+              Triggers automatically at {formatTime12h(time)} local time · Disabled streams stay unchanged
             </p>
           </div>
           <button
@@ -123,7 +172,7 @@ export const ScheduleFormSheet: React.FC<ScheduleFormSheetProps> = ({
               maxLength={40}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Morning Ringtone or Night Quiet"
+              placeholder="e.g. Workday Balanced or Night Quiet"
               className="w-full min-h-[46px] px-3.5 py-2.5 rounded-xl bg-[#0B111A] border border-slate-700/80 text-slate-100 placeholder:text-slate-500 text-sm focus:outline-none focus:border-cyan-400"
             />
           </div>
@@ -167,73 +216,88 @@ export const ScheduleFormSheet: React.FC<ScheduleFormSheetProps> = ({
             </div>
           </div>
 
-          <div>
-            <span className="block text-sm font-medium text-slate-300 mb-2">
-              Android Audio Stream
-            </span>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {STREAM_OPTIONS.map((opt) => {
-                const active = stream === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    onClick={() => setStream(opt.key)}
-                    className={`min-h-[44px] px-3 py-2 rounded-xl border text-left transition-colors ${
-                      active
-                        ? 'bg-cyan-500/15 border-cyan-400 text-cyan-200'
-                        : 'bg-[#0B111A] border-slate-800 text-slate-300 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="text-sm font-medium whitespace-nowrap">{opt.label}</div>
-                  </button>
-                );
-              })}
-            </div>
-            {stream === 'voice_call' && (
-              <p className="text-xs text-slate-400 mt-2">
-                Android enforces a minimum non-zero step on Voice Call stream on most devices.
-              </p>
-            )}
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label
-                htmlFor="schedule-percentage"
-                className="text-sm font-medium text-slate-300"
-              >
-                Target Volume Level
-              </label>
-              <span className="font-mono-tabular text-base font-semibold text-cyan-300">
-                {percentage}%
+          {/* Individual per-stream controls */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-300">
+                Audio Stream Targets
+              </span>
+              <span className="text-xs text-slate-400">
+                Independent per stream
               </span>
             </div>
-            <input
-              id="schedule-percentage"
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={percentage}
-              onChange={(e) => setPercentage(Number(e.target.value))}
-              className="volume-slider w-full"
-            />
-            <div className="grid grid-cols-5 gap-2 mt-3">
-              {[0, 25, 50, 75, 100].map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => setPercentage(preset)}
-                  className={`min-h-[40px] rounded-lg text-xs font-mono-tabular font-medium border transition-colors ${
-                    percentage === preset
-                      ? 'bg-cyan-400 text-[#0B111A] border-cyan-400'
-                      : 'bg-[#0B111A] text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  {preset}%
-                </button>
-              ))}
+
+            <div className="space-y-2.5">
+              {STREAM_OPTIONS.map((opt) => {
+                const cfg = streams[opt.key];
+                const isStreamOn = cfg.enabled;
+                return (
+                  <div
+                    key={opt.key}
+                    className={`rounded-xl border p-3.5 transition-colors ${
+                      isStreamOn
+                        ? 'bg-[#0B111A] border-slate-700'
+                        : 'bg-[#0B111A]/60 border-slate-800/80 opacity-75'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-100">
+                          {opt.label}
+                        </div>
+                        <div className="text-xs text-slate-400 truncate">
+                          {isStreamOn ? opt.description : 'Unchanged when this rule fires'}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span
+                          className={`font-mono-tabular text-sm font-semibold w-11 text-right ${
+                            isStreamOn ? 'text-cyan-300' : 'text-slate-500'
+                          }`}
+                        >
+                          {isStreamOn ? `${cfg.percentage}%` : 'Skip'}
+                        </span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={isStreamOn}
+                          aria-label={`Toggle ${opt.label} in rule`}
+                          onClick={() => toggleStreamEnabled(opt.key)}
+                          className="min-h-[44px] min-w-[48px] flex items-center justify-end"
+                        >
+                          <span
+                            className={`w-11 h-6 rounded-full p-0.5 transition-colors flex items-center ${
+                              isStreamOn ? 'bg-cyan-400 justify-end' : 'bg-slate-700 justify-start'
+                            }`}
+                          >
+                            <span className="w-5 h-5 rounded-full bg-[#0B111A] shadow" />
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-2.5 flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={cfg.percentage}
+                        aria-label={`${opt.label} volume percentage`}
+                        onChange={(e) => updateStreamPercentage(opt.key, Number(e.target.value))}
+                        className="volume-slider flex-1"
+                      />
+                    </div>
+
+                    {opt.key === 'voice_call' && isStreamOn && (
+                      <p className="text-[11px] text-slate-400 mt-2">
+                        Android typically enforces a minimum non-zero step (&ge;1) on Voice Call.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

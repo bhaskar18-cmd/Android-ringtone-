@@ -12,6 +12,7 @@ object VolumeSchedulerStorage {
     private const val KEY_SCHEDULER_ENABLED = "scheduler_enabled"
     private const val KEY_INITIALIZED = "defaults_initialized_v1"
     private const val KEY_LOGS = "execution_logs_json"
+    private const val KEY_LAST_TEST_RESULT = "last_test_alarm_result_json"
     private const val KEY_LAST_BOOT_AT = "last_boot_restore_at"
     private const val KEY_LAST_BOOT_REASON = "last_boot_restore_reason"
     private const val KEY_LAST_BOOT_COUNT = "last_boot_restored_count"
@@ -33,8 +34,12 @@ object VolumeSchedulerStorage {
             id = "default-day-0800",
             label = "Day Mode",
             time = "08:00",
-            stream = AudioStreamType.RINGTONE.key,
-            percentage = 100,
+            streams = VolumeSchedule.defaultStreams(
+                mapOf(
+                    AudioStreamType.RINGTONE.key to StreamRuleConfig(true, 100),
+                    AudioStreamType.NOTIFICATION.key to StreamRuleConfig(true, 100)
+                )
+            ),
             days = allDays,
             enabled = true
         )
@@ -42,8 +47,12 @@ object VolumeSchedulerStorage {
             id = "default-night-2000",
             label = "Night Mode",
             time = "20:00",
-            stream = AudioStreamType.RINGTONE.key,
-            percentage = 50,
+            streams = VolumeSchedule.defaultStreams(
+                mapOf(
+                    AudioStreamType.RINGTONE.key to StreamRuleConfig(true, 50),
+                    AudioStreamType.NOTIFICATION.key to StreamRuleConfig(true, 50)
+                )
+            ),
             days = allDays,
             enabled = true
         )
@@ -146,6 +155,21 @@ object VolumeSchedulerStorage {
         } catch (_: Exception) {
         }
         return list
+    }
+
+    @Synchronized
+    fun saveLastTestAlarmResult(context: Context, result: StreamTestResult) {
+        prefs(context).edit().putString(KEY_LAST_TEST_RESULT, result.toJson().toString()).commit()
+    }
+
+    @Synchronized
+    fun getLastTestAlarmResult(context: Context): StreamTestResult? {
+        val raw = prefs(context).getString(KEY_LAST_TEST_RESULT, null) ?: return null
+        return try {
+            StreamTestResult.fromJson(JSONObject(raw))
+        } catch (_: Exception) {
+            null
+        }
     }
 
     @Synchronized

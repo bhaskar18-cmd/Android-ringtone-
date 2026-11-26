@@ -12070,6 +12070,12 @@ var X = createLucideIcon("x", [["path", {
 var import_client = require_client();
 var STREAM_OPTIONS = [
 	{
+		key: "media",
+		label: "Media",
+		shortLabel: "Media",
+		description: "Music, video, and in-app media playback"
+	},
+	{
 		key: "ringtone",
 		label: "Ringtone",
 		shortLabel: "Ring",
@@ -12086,12 +12092,6 @@ var STREAM_OPTIONS = [
 		label: "Alarm",
 		shortLabel: "Alarm",
 		description: "Clock alarms and timer alerts"
-	},
-	{
-		key: "media",
-		label: "Media",
-		shortLabel: "Media",
-		description: "Music, video, and in-app audio"
 	},
 	{
 		key: "voice_call",
@@ -12111,6 +12111,10 @@ var WEEKDAY_LABELS = [
 ];
 function getStreamLabel(stream) {
 	return STREAM_OPTIONS.find((s) => s.key === stream)?.label ?? stream;
+}
+function formatRuleStreamsSummary(streams) {
+	const parts = STREAM_OPTIONS.filter((opt) => streams[opt.key]?.enabled).map((opt) => `${opt.shortLabel} ${streams[opt.key].percentage}%`);
+	return parts.length > 0 ? parts.join(" · ") : "No streams enabled";
 }
 function formatTime12h(time24) {
 	const [hStr, mStr] = time24.split(":");
@@ -12170,7 +12174,7 @@ function inferActiveProfileName(schedules, schedulerEnabled) {
 	}).filter((item) => item.mins <= nowMinutes).sort((a, b) => b.mins - a.mins);
 	if (todayMatches.length > 0) {
 		const s = todayMatches[0].schedule;
-		return `${s.label || `${getStreamLabel(s.stream)} ${s.percentage}%`} · ${formatTime12h(s.time)}`;
+		return `${s.label || formatRuleStreamsSummary(s.streams)} · ${formatTime12h(s.time)}`;
 	}
 	const yesterday = (today + 6) % 7;
 	const yesterdayMatches = enabled.filter((s) => s.days.includes(yesterday)).map((s) => {
@@ -12182,7 +12186,7 @@ function inferActiveProfileName(schedules, schedulerEnabled) {
 	}).sort((a, b) => b.mins - a.mins);
 	if (yesterdayMatches.length > 0) {
 		const s = yesterdayMatches[0].schedule;
-		return `${s.label || `${getStreamLabel(s.stream)} ${s.percentage}%`} · ${formatTime12h(s.time)} (Overnight)`;
+		return `${s.label || formatRuleStreamsSummary(s.streams)} · ${formatTime12h(s.time)} (Overnight)`;
 	}
 	return "Custom Active Schedule";
 }
@@ -12250,7 +12254,7 @@ var DashboardTab = ({ settings, permissions, busyAction, lastFeedback, onRefresh
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 								className: "text-xs font-medium text-slate-400",
-								children: "Active Volume Profile"
+								children: "Last Active Schedule Profile"
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
 								className: "text-xl font-semibold text-slate-100 mt-1 leading-snug",
@@ -12300,31 +12304,34 @@ var DashboardTab = ({ settings, permissions, busyAction, lastFeedback, onRefresh
 					className: "lg:col-span-5 bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 flex flex-col justify-between gap-4",
 					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "flex items-start justify-between gap-3",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-							className: "text-xs font-medium text-slate-400",
-							children: "Next Scheduled Change"
-						}), settings.nextScheduledChange ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex items-baseline gap-2.5 mt-1",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-								className: "text-2xl font-bold font-mono-tabular text-slate-100",
-								children: formatTime12h(settings.nextScheduledChange.time)
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
-								className: "text-sm font-semibold font-mono-tabular text-cyan-300",
-								children: [settings.nextScheduledChange.percentage, "%"]
-							})]
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-							className: "text-sm text-slate-300 mt-1",
-							children: [getStreamLabel(settings.nextScheduledChange.stream), settings.nextScheduledChange.label ? ` · ${settings.nextScheduledChange.label}` : ""]
-						})] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "mt-1.5",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "min-w-0",
 							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "text-base font-semibold text-slate-200",
-								children: "No active alarm queued"
+								className: "text-xs font-medium text-slate-400",
+								children: "Next Scheduled Change"
+							}), settings.nextScheduledChange ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-baseline gap-2.5 mt-1",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-2xl font-bold font-mono-tabular text-slate-100",
+									children: formatTime12h(settings.nextScheduledChange.time)
+								}), settings.nextScheduledChange.label && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-sm font-medium text-cyan-300 truncate",
+									children: settings.nextScheduledChange.label
+								})]
 							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "text-xs text-slate-400 mt-1",
-								children: settings.schedulerEnabled ? "Enable or add a schedule rule to queue an alarm." : "Enable the scheduler to resume automatic triggers."
+								className: "text-xs text-slate-300 mt-1.5 leading-relaxed",
+								children: formatRuleStreamsSummary(settings.nextScheduledChange.streams)
+							})] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "mt-1.5",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "text-base font-semibold text-slate-200",
+									children: "No active alarm queued"
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "text-xs text-slate-400 mt-1",
+									children: settings.schedulerEnabled ? "Enable or add a schedule rule to queue an alarm." : "Enable the scheduler to resume automatic triggers."
+								})]
 							})]
-						})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Clock, { className: "w-5 h-5 text-cyan-400 shrink-0 mt-0.5" })]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Clock, { className: "w-5 h-5 text-cyan-400 shrink-0 mt-0.5" })]
 					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
@@ -12362,10 +12369,10 @@ var DashboardTab = ({ settings, permissions, busyAction, lastFeedback, onRefresh
 					className: "flex items-center justify-between mb-3",
 					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
 						className: "text-sm font-semibold text-slate-200",
-						children: "Current System Volume Levels"
+						children: "Live Android System Volume Levels"
 					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 						className: "text-xs text-slate-400",
-						children: "Hardware step accuracy"
+						children: "Read directly from AudioManager"
 					})]
 				}),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
@@ -12546,11 +12553,11 @@ var DashboardTab = ({ settings, permissions, busyAction, lastFeedback, onRefresh
 							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
 								className: "text-xs text-slate-400",
 								children: [
-									"Android maps percentages to discrete hardware steps (",
+									"Discrete hardware steps on this stream: ",
 									settings.streams[selectedStream]?.minIndex ?? 0,
 									"–",
 									settings.streams[selectedStream]?.maxIndex ?? 15,
-									")."
+									"."
 								]
 							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 								type: "button",
@@ -12751,876 +12758,6 @@ var PermissionsTab = ({ permissions, busyAction, lastMessage, onRefresh, onReque
 							" if you want scheduled profiles to raise or lower Ringtone and Notification volumes while DND is active."
 						] })
 					]
-				})]
-			})
-		]
-	});
-};
-// src/components/ScheduleFormSheet.tsx
-var ScheduleFormSheet = ({ open, initialSchedule, saving, onClose, onSave }) => {
-	const [label, setLabel] = (0, import_react.useState)("");
-	const [time, setTime] = (0, import_react.useState)("08:00");
-	const [stream, setStream] = (0, import_react.useState)("ringtone");
-	const [percentage, setPercentage] = (0, import_react.useState)(80);
-	const [days, setDays] = (0, import_react.useState)([
-		0,
-		1,
-		2,
-		3,
-		4,
-		5,
-		6
-	]);
-	const [enabled, setEnabled] = (0, import_react.useState)(true);
-	const [error, setError] = (0, import_react.useState)("");
-	(0, import_react.useEffect)(() => {
-		if (!open) return;
-		if (initialSchedule) {
-			setLabel(initialSchedule.label);
-			setTime(initialSchedule.time);
-			setStream(initialSchedule.stream);
-			setPercentage(initialSchedule.percentage);
-			setDays(initialSchedule.days.length > 0 ? initialSchedule.days : [
-				0,
-				1,
-				2,
-				3,
-				4,
-				5,
-				6
-			]);
-			setEnabled(initialSchedule.enabled);
-		} else {
-			setLabel("");
-			setTime("08:00");
-			setStream("ringtone");
-			setPercentage(80);
-			setDays([
-				0,
-				1,
-				2,
-				3,
-				4,
-				5,
-				6
-			]);
-			setEnabled(true);
-		}
-		setError("");
-	}, [open, initialSchedule]);
-	if (!open) return null;
-	const toggleDay = (dayIndex) => {
-		setDays((prev) => {
-			if (prev.includes(dayIndex)) {
-				if (prev.length === 1) return prev;
-				return prev.filter((d) => d !== dayIndex);
-			}
-			return [...prev, dayIndex].sort((a, b) => a - b);
-		});
-	};
-	const handleSubmit = async (e) => {
-		e.preventDefault();
-		if (!/^\d{2}:\d{2}$/.test(time)) {
-			setError("Enter a valid local time in HH:mm format.");
-			return;
-		}
-		if (days.length === 0) {
-			setError("Select at least one weekday.");
-			return;
-		}
-		setError("");
-		await onSave({
-			id: initialSchedule?.id,
-			label: label.trim(),
-			time,
-			stream,
-			percentage,
-			days,
-			enabled
-		});
-	};
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-		className: "fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm",
-		role: "dialog",
-		"aria-modal": "true",
-		"aria-labelledby": "schedule-sheet-title",
-		children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-			className: "w-full sm:max-w-lg max-h-[92dvh] flex flex-col bg-[#121A26] border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden",
-			children: [
-				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "sm:hidden w-10 h-1.5 bg-slate-700 rounded-full mx-auto mt-3 shrink-0" }),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "flex items-center justify-between px-5 py-4 border-b border-slate-800/80 shrink-0",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
-						id: "schedule-sheet-title",
-						className: "text-lg font-semibold text-slate-100",
-						children: initialSchedule ? "Edit Schedule" : "New Volume Schedule"
-					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-						className: "text-xs text-slate-400 mt-0.5",
-						children: [
-							"Triggers automatically at ",
-							formatTime12h(time),
-							" local time"
-						]
-					})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-						type: "button",
-						onClick: onClose,
-						className: "min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 transition-colors",
-						"aria-label": "Close schedule editor",
-						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-5 h-5" })
-					})]
-				}),
-				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("form", {
-					onSubmit: handleSubmit,
-					className: "flex-1 overflow-y-auto px-5 py-5 space-y-5",
-					children: [
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
-							htmlFor: "schedule-label",
-							className: "block text-sm font-medium text-slate-300 mb-2",
-							children: "Profile Label"
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-							id: "schedule-label",
-							type: "text",
-							maxLength: 40,
-							value: label,
-							onChange: (e) => setLabel(e.target.value),
-							placeholder: "e.g. Morning Ringtone or Night Quiet",
-							className: "w-full min-h-[46px] px-3.5 py-2.5 rounded-xl bg-[#0B111A] border border-slate-700/80 text-slate-100 placeholder:text-slate-500 text-sm focus:outline-none focus:border-cyan-400"
-						})] }),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "grid grid-cols-1 sm:grid-cols-2 gap-4",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
-								htmlFor: "schedule-time",
-								className: "block text-sm font-medium text-slate-300 mb-2",
-								children: "Trigger Time (Local)"
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-								id: "schedule-time",
-								type: "time",
-								required: true,
-								value: time,
-								onChange: (e) => setTime(e.target.value),
-								className: "w-full min-h-[46px] px-3.5 py-2.5 rounded-xl bg-[#0B111A] border border-slate-700/80 text-slate-100 font-mono-tabular text-base focus:outline-none focus:border-cyan-400"
-							})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-								className: "block text-sm font-medium text-slate-300 mb-2",
-								children: "Rule State"
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-								type: "button",
-								onClick: () => setEnabled((v) => !v),
-								className: `w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border text-sm font-medium flex items-center justify-between transition-colors ${enabled ? "bg-cyan-500/10 border-cyan-400/50 text-cyan-300" : "bg-[#0B111A] border-slate-700/80 text-slate-400"}`,
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: enabled ? "Enabled" : "Disabled" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "font-mono-tabular text-xs",
-									children: enabled ? "ON" : "OFF"
-								})]
-							})] })]
-						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-								className: "block text-sm font-medium text-slate-300 mb-2",
-								children: "Android Audio Stream"
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "grid grid-cols-2 sm:grid-cols-3 gap-2",
-								children: STREAM_OPTIONS.map((opt) => {
-									const active = stream === opt.key;
-									return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-										type: "button",
-										onClick: () => setStream(opt.key),
-										className: `min-h-[44px] px-3 py-2 rounded-xl border text-left transition-colors ${active ? "bg-cyan-500/15 border-cyan-400 text-cyan-200" : "bg-[#0B111A] border-slate-800 text-slate-300 hover:border-slate-700"}`,
-										children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-											className: "text-sm font-medium whitespace-nowrap",
-											children: opt.label
-										})
-									}, opt.key);
-								})
-							}),
-							stream === "voice_call" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "text-xs text-slate-400 mt-2",
-								children: "Android enforces a minimum non-zero step on Voice Call stream on most devices."
-							})
-						] }),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "flex items-center justify-between mb-2",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
-									htmlFor: "schedule-percentage",
-									className: "text-sm font-medium text-slate-300",
-									children: "Target Volume Level"
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
-									className: "font-mono-tabular text-base font-semibold text-cyan-300",
-									children: [percentage, "%"]
-								})]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-								id: "schedule-percentage",
-								type: "range",
-								min: 0,
-								max: 100,
-								step: 1,
-								value: percentage,
-								onChange: (e) => setPercentage(Number(e.target.value)),
-								className: "volume-slider w-full"
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "grid grid-cols-5 gap-2 mt-3",
-								children: [
-									0,
-									25,
-									50,
-									75,
-									100
-								].map((preset) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-									type: "button",
-									onClick: () => setPercentage(preset),
-									className: `min-h-[40px] rounded-lg text-xs font-mono-tabular font-medium border transition-colors ${percentage === preset ? "bg-cyan-400 text-[#0B111A] border-cyan-400" : "bg-[#0B111A] text-slate-300 border-slate-800 hover:border-slate-700"}`,
-									children: [preset, "%"]
-								}, preset))
-							})
-						] }),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex items-center justify-between mb-2",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-								className: "text-sm font-medium text-slate-300",
-								children: "Repeat Weekdays"
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "flex items-center gap-3 text-xs",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-									type: "button",
-									onClick: () => setDays([
-										0,
-										1,
-										2,
-										3,
-										4,
-										5,
-										6
-									]),
-									className: "text-cyan-400 hover:text-cyan-300 py-1 px-1",
-									children: "Every day"
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-									type: "button",
-									onClick: () => setDays([
-										1,
-										2,
-										3,
-										4,
-										5
-									]),
-									className: "text-slate-400 hover:text-slate-200 py-1 px-1",
-									children: "Weekdays"
-								})]
-							})]
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-							className: "grid grid-cols-7 gap-1.5",
-							children: WEEKDAY_LABELS.map((dayName, idx) => {
-								const selected = days.includes(idx);
-								return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-									type: "button",
-									onClick: () => toggleDay(idx),
-									className: `min-h-[44px] rounded-xl text-xs font-medium border transition-colors ${selected ? "bg-cyan-400 text-[#0B111A] border-cyan-400 font-semibold" : "bg-[#0B111A] text-slate-400 border-slate-800 hover:border-slate-700"}`,
-									"aria-pressed": selected,
-									children: dayName
-								}, dayName);
-							})
-						})] }),
-						error && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-							className: "text-sm text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3.5 py-2.5",
-							children: error
-						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "pt-2 flex items-center gap-3 border-t border-slate-800/80",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-								type: "button",
-								onClick: onClose,
-								className: "flex-1 min-h-[48px] px-4 py-2.5 rounded-xl border border-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-800/60 transition-colors",
-								children: "Cancel"
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-								type: "submit",
-								disabled: saving,
-								className: "flex-1 min-h-[48px] px-4 py-2.5 rounded-xl bg-cyan-400 text-[#0B111A] text-sm font-semibold hover:bg-cyan-300 disabled:opacity-60 transition-colors",
-								children: saving ? "Saving..." : initialSchedule ? "Save Changes" : "Save Schedule"
-							})]
-						})
-					]
-				})
-			]
-		})
-	});
-};
-// src/components/SchedulesTab.tsx
-var SchedulesTab = ({ schedules, schedulerEnabled, busyId, onAdd, onEdit, onDelete, onToggleRule }) => {
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-		className: "space-y-5",
-		children: [
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-				className: "flex flex-col sm:flex-row sm:items-center justify-between gap-3",
-				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
-					className: "text-lg font-semibold text-slate-100",
-					children: "Volume Schedules"
-				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-					className: "text-xs text-slate-400 mt-0.5",
-					children: "Executed natively by Android AlarmManager in local time, even when closed or rebooted."
-				})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-					type: "button",
-					onClick: onAdd,
-					className: "min-h-[44px] px-4 py-2 rounded-xl bg-cyan-400 text-[#0B111A] text-sm font-semibold hover:bg-cyan-300 transition-colors flex items-center justify-center gap-2 whitespace-nowrap shrink-0",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Plus, { className: "w-4 h-4" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Add Schedule" })]
-				})]
-			}),
-			!schedulerEnabled && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-				className: "bg-amber-500/10 border border-amber-500/30 rounded-2xl px-4 py-3 text-xs text-amber-200",
-				children: "Master scheduler is currently paused. Individual rules remain saved locally and will resume once you enable the scheduler."
-			}),
-			schedules.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-8 text-center space-y-3",
-				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CalendarClock, { className: "w-8 h-8 text-slate-500 mx-auto" }),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "text-sm font-medium text-slate-200",
-						children: "No volume schedules configured"
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "text-xs text-slate-400 max-w-sm mx-auto",
-						children: "Add a daily or weekday schedule to adjust Ringtone, Notification, Alarm, Media, or Voice Call levels automatically."
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-						type: "button",
-						onClick: onAdd,
-						className: "min-h-[44px] px-5 py-2 rounded-xl bg-cyan-400 text-[#0B111A] text-sm font-semibold hover:bg-cyan-300 transition-colors",
-						children: "Create First Schedule"
-					})
-				]
-			}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-				className: "grid grid-cols-1 md:grid-cols-2 gap-3.5",
-				children: schedules.map((item) => {
-					const isBusy = busyId === item.id;
-					return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: `bg-[#121A26] border rounded-2xl p-4 flex flex-col justify-between gap-4 transition-colors ${item.enabled ? "border-slate-800/90" : "border-slate-800/50 opacity-75"}`,
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex items-start justify-between gap-3",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "min-w-0",
-								children: [
-									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-										className: "flex items-baseline gap-2.5 flex-wrap",
-										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "text-2xl font-bold font-mono-tabular text-slate-100",
-											children: formatTime12h(item.time)
-										}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
-											className: "text-base font-semibold font-mono-tabular text-cyan-300",
-											children: [item.percentage, "%"]
-										})]
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-										className: "text-sm font-medium text-slate-200 mt-1 truncate",
-										children: [getStreamLabel(item.stream), item.label ? ` · ${item.label}` : ""]
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-										className: "text-xs text-slate-400 mt-1",
-										children: formatDaysSummary(item.days)
-									})
-								]
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-								type: "button",
-								role: "switch",
-								"aria-checked": item.enabled,
-								"aria-label": `Toggle ${item.label || item.time} schedule`,
-								disabled: isBusy,
-								onClick: () => void onToggleRule(item.id, !item.enabled),
-								className: "min-h-[44px] min-w-[52px] flex items-center justify-end shrink-0",
-								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: `w-12 h-7 rounded-full p-1 transition-colors flex items-center ${item.enabled ? "bg-cyan-400 justify-end" : "bg-slate-700 justify-start"}`,
-									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "w-5 h-5 rounded-full bg-[#0B111A] shadow" })
-								})
-							})]
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "text-xs text-slate-400 min-w-0",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "truncate font-mono-tabular",
-									children: schedulerEnabled && item.enabled ? formatTriggerRelative(item.nextTriggerAt) : "Not queued"
-								}), item.lastExecutedAt > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-									className: `truncate mt-0.5 ${item.lastExecutionSuccess ? "text-slate-500" : "text-rose-400"}`,
-									children: ["Last run: ", formatTimestamp(item.lastExecutedAt)]
-								})]
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "flex items-center gap-1 shrink-0",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-									type: "button",
-									onClick: () => onEdit(item),
-									disabled: isBusy,
-									className: "min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-300 hover:text-cyan-300 hover:bg-slate-800/70 transition-colors",
-									"aria-label": `Edit schedule ${item.label || item.time}`,
-									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PenLine, { className: "w-4 h-4" })
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-									type: "button",
-									onClick: () => void onDelete(item.id),
-									disabled: isBusy,
-									className: "min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors",
-									"aria-label": `Delete schedule ${item.label || item.time}`,
-									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Trash2, { className: "w-4 h-4" })
-								})]
-							})]
-						})]
-					}, item.id);
-				})
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-4 text-xs text-slate-400 leading-relaxed",
-				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-					className: "font-semibold text-slate-200",
-					children: "Midnight-crossing behavior: "
-				}), "Each rule calculates its next local timestamp strictly ahead of the current clock and reschedules the following day or weekday immediately after firing—so overnight pairs like Night Mode at 8:00 PM and Day Mode at 8:00 AM transition seamlessly across midnight."]
-			})
-		]
-	});
-};
-// src/components/TestingTab.tsx
-var TestingTab = ({ isNative, permissions, bootRestore, logs, onTestStream, onScheduleTestAlarm, onProbeAudioMode, onRefreshLogs }) => {
-	const [testPct, setTestPct] = (0, import_react.useState)(65);
-	const [testingStream, setTestingStream] = (0, import_react.useState)(null);
-	const [streamResult, setStreamResult] = (0, import_react.useState)(null);
-	const [alarmStream, setAlarmStream] = (0, import_react.useState)("ringtone");
-	const [alarmPct, setAlarmPct] = (0, import_react.useState)(70);
-	const [alarmDelay, setAlarmDelay] = (0, import_react.useState)(10);
-	const [alarmResult, setAlarmResult] = (0, import_react.useState)(null);
-	const [schedulingAlarm, setSchedulingAlarm] = (0, import_react.useState)(false);
-	const [probeData, setProbeData] = (0, import_react.useState)(null);
-	const [probing, setProbing] = (0, import_react.useState)(false);
-	const handleRunStreamTest = async (stream) => {
-		setTestingStream(stream);
-		try {
-			const res = await onTestStream(stream, testPct, true);
-			setStreamResult(res);
-		} finally {
-			setTestingStream(null);
-		}
-	};
-	const handleRunAlarmTest = async () => {
-		setSchedulingAlarm(true);
-		try {
-			const res = await onScheduleTestAlarm(alarmDelay, alarmStream, alarmPct);
-			setAlarmResult(res);
-		} finally {
-			setSchedulingAlarm(false);
-		}
-	};
-	const handleProbe = async () => {
-		setProbing(true);
-		try {
-			const res = await onProbeAudioMode();
-			setProbeData(res);
-		} finally {
-			setProbing(false);
-		}
-	};
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-		className: "space-y-6",
-		children: [
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
-				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4",
-				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "flex flex-col sm:flex-row sm:items-center justify-between gap-3",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
-							className: "text-base font-semibold text-slate-100",
-							children: "Hardware Audio Stream Verification"
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-							className: "text-xs text-slate-400 mt-0.5",
-							children: "Applies the selected percentage through Android AudioManager, plays a brief probe tone, and reads back the actual hardware index."
-						})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-							className: "flex items-center gap-2 shrink-0",
-							children: [
-								25,
-								50,
-								75,
-								100
-							].map((pct) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-								type: "button",
-								onClick: () => setTestPct(pct),
-								className: `min-h-[40px] px-3 rounded-lg text-xs font-mono-tabular font-medium border transition-colors ${testPct === pct ? "bg-cyan-400 text-[#0B111A] border-cyan-400 font-semibold" : "bg-[#0B111A] text-slate-300 border-slate-800 hover:border-slate-700"}`,
-								children: [pct, "%"]
-							}, pct))
-						})]
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-						className: "grid grid-cols-1 sm:grid-cols-2 gap-3",
-						children: [
-							{
-								key: "ringtone",
-								label: "Test Ringtone Volume",
-								note: "AudioManager.STREAM_RING"
-							},
-							{
-								key: "notification",
-								label: "Test Notification Volume",
-								note: "AudioManager.STREAM_NOTIFICATION"
-							},
-							{
-								key: "alarm",
-								label: "Test Alarm Volume",
-								note: "AudioManager.STREAM_ALARM"
-							},
-							{
-								key: "voice_call",
-								label: "Test Call Volume",
-								note: "AudioManager.STREAM_VOICE_CALL (min step >= 1)"
-							}
-						].map((btn) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-							type: "button",
-							disabled: testingStream !== null,
-							onClick: () => void handleRunStreamTest(btn.key),
-							className: "min-h-[56px] px-4 py-3 rounded-xl bg-[#0B111A] border border-slate-800 hover:border-cyan-400/60 text-left flex items-center justify-between gap-3 transition-colors disabled:opacity-60",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "min-w-0",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "text-sm font-medium text-slate-100",
-									children: btn.label
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "text-xs font-mono-tabular text-slate-400 truncate mt-0.5",
-									children: btn.note
-								})]
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Play, { className: "w-4 h-4 text-cyan-400 shrink-0" })]
-						}, btn.key))
-					}),
-					streamResult && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: `rounded-xl border p-4 text-sm space-y-1.5 ${streamResult.applyResult.success ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-100" : "bg-rose-500/10 border-rose-500/30 text-rose-200"}`,
-						children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "flex items-center gap-2 font-semibold",
-								children: [streamResult.applyResult.success ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleCheck, { className: "w-4 h-4 text-emerald-400 shrink-0" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleX, { className: "w-4 h-4 text-rose-400 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: streamResult.applyResult.success ? `${getStreamLabel(streamResult.applyResult.stream)} Verified` : `${getStreamLabel(streamResult.applyResult.stream)} Failed` })]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "text-xs leading-relaxed opacity-95",
-								children: streamResult.applyResult.message
-							}),
-							streamResult.applyResult.success && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-								className: "text-xs font-mono-tabular text-slate-300",
-								children: [
-									"Actual step: ",
-									streamResult.applyResult.actualIndex,
-									"/",
-									streamResult.applyResult.maxIndex,
-									" (",
-									streamResult.applyResult.actualPercentage,
-									"%) · ",
-									streamResult.toneMessage
-								]
-							})
-						]
-					})
-				]
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
-				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4",
-				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "flex items-start justify-between gap-3",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
-							className: "text-base font-semibold text-slate-100",
-							children: "Test Scheduled Background Execution"
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-							className: "text-xs text-slate-400 mt-0.5",
-							children: "Queues a real native AlarmManager broadcast. Lock your screen or swipe the app from recent apps after starting to verify autonomous execution."
-						})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Clock, { className: "w-5 h-5 text-cyan-400 shrink-0" })]
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "grid grid-cols-1 sm:grid-cols-3 gap-3",
-						children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
-								className: "block text-xs font-medium text-slate-400 mb-1.5",
-								children: "Delay"
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "grid grid-cols-2 gap-2",
-								children: [10, 30].map((sec) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-									type: "button",
-									onClick: () => setAlarmDelay(sec),
-									className: `min-h-[44px] rounded-xl text-xs font-mono-tabular font-medium border ${alarmDelay === sec ? "bg-cyan-400 text-[#0B111A] border-cyan-400 font-semibold" : "bg-[#0B111A] text-slate-300 border-slate-800"}`,
-									children: [sec, "s"]
-								}, sec))
-							})] }),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
-								htmlFor: "test-alarm-stream",
-								className: "block text-xs font-medium text-slate-400 mb-1.5",
-								children: "Stream"
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
-								id: "test-alarm-stream",
-								value: alarmStream,
-								onChange: (e) => setAlarmStream(e.target.value),
-								className: "w-full min-h-[44px] px-3 rounded-xl bg-[#0B111A] border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-cyan-400",
-								children: [
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-										value: "ringtone",
-										children: "Ringtone"
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-										value: "notification",
-										children: "Notification"
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-										value: "alarm",
-										children: "Alarm"
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-										value: "media",
-										children: "Media"
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-										value: "voice_call",
-										children: "Voice Call"
-									})
-								]
-							})] }),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
-								htmlFor: "test-alarm-pct",
-								className: "block text-xs font-medium text-slate-400 mb-1.5",
-								children: "Target %"
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
-								id: "test-alarm-pct",
-								type: "number",
-								min: 0,
-								max: 100,
-								value: alarmPct,
-								onChange: (e) => setAlarmPct(Math.min(100, Math.max(0, Number(e.target.value) || 0))),
-								className: "w-full min-h-[44px] px-3 rounded-xl bg-[#0B111A] border border-slate-800 text-sm font-mono-tabular text-slate-100 focus:outline-none focus:border-cyan-400"
-							})] })
-						]
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-						type: "button",
-						onClick: () => void handleRunAlarmTest(),
-						disabled: schedulingAlarm,
-						className: "w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl bg-cyan-400 text-[#0B111A] text-sm font-semibold hover:bg-cyan-300 disabled:opacity-60 transition-colors",
-						children: schedulingAlarm ? "Scheduling..." : `Schedule Test Alarm (${alarmDelay}s)`
-					}),
-					alarmResult && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: `rounded-xl border p-4 text-xs space-y-1 ${alarmResult.success ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-100" : "bg-rose-500/10 border-rose-500/30 text-rose-200"}`,
-						children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "flex items-center gap-2 font-semibold text-sm",
-								children: [alarmResult.success ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleCheck, { className: "w-4 h-4 text-emerald-400 shrink-0" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleX, { className: "w-4 h-4 text-rose-400 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: alarmResult.success ? `Queued (${alarmResult.mode})` : "Test Alarm Failed" })]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "leading-relaxed",
-								children: alarmResult.message
-							}),
-							alarmResult.nextTriggerAt > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-								className: "font-mono-tabular text-slate-300",
-								children: ["Scheduled fire time: ", formatTimestamp(alarmResult.nextTriggerAt)]
-							})
-						]
-					})
-				]
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
-				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4",
-				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-						className: "flex items-start justify-between gap-3",
-						children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex items-start gap-2.5",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(PhoneCall, { className: "w-5 h-5 text-cyan-400 shrink-0 mt-0.5" }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
-								className: "text-base font-semibold text-slate-100",
-								children: "WhatsApp Call Volume Limitation & Live Probe"
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "text-xs text-slate-400 mt-0.5",
-								children: "Empirical stream checker for VoIP calls on your device"
-							})] })]
-						})
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "bg-[#0B111A] border border-slate-800 rounded-xl p-4 space-y-2.5 text-xs text-slate-300 leading-relaxed",
-						children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "flex items-start gap-2 text-amber-300 font-medium",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ShieldAlert, { className: "w-4 h-4 shrink-0 mt-0.5" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Android does not allow third-party apps to isolate WhatsApp-only call volume." })]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [
-								"WhatsApp VoIP calls route audio through Android's shared system streams—typically",
-								" ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "font-mono-tabular text-slate-100",
-									children: "STREAM_VOICE_CALL"
-								}),
-								" when in",
-								" ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "font-mono-tabular text-slate-100",
-									children: "MODE_IN_COMMUNICATION"
-								}),
-								", or Bluetooth/Media routing depending on your headset and Vivo Android 16 audio policy."
-							] }),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [
-								"This app intentionally avoids Accessibility Services, root access, or private API hooks. Use the live probe below while on a WhatsApp call to verify whether ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "font-mono-tabular text-slate-100",
-									children: "Voice Call"
-								}),
-								" or ",
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "font-mono-tabular text-slate-100",
-									children: "Media"
-								}),
-								" changes your call loudness."
-							] })
-						]
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "flex flex-wrap items-center gap-2.5",
-						children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-								type: "button",
-								onClick: () => void handleProbe(),
-								disabled: probing,
-								className: "min-h-[44px] px-4 py-2 rounded-xl bg-[#0B111A] border border-cyan-400/50 text-cyan-300 text-xs font-semibold hover:bg-cyan-400/10 transition-colors flex items-center gap-2",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCw, { className: `w-3.5 h-3.5 ${probing ? "animate-spin" : ""}` }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Probe Live Audio Mode" })]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-								type: "button",
-								onClick: () => void handleRunStreamTest("voice_call"),
-								disabled: testingStream !== null,
-								className: "min-h-[44px] px-4 py-2 rounded-xl bg-[#0B111A] border border-slate-700 text-slate-200 text-xs font-medium hover:border-slate-600 transition-colors",
-								children: [
-									"Apply ",
-									testPct,
-									"% to Voice Call"
-								]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-								type: "button",
-								onClick: () => void handleRunStreamTest("media"),
-								disabled: testingStream !== null,
-								className: "min-h-[44px] px-4 py-2 rounded-xl bg-[#0B111A] border border-slate-700 text-slate-200 text-xs font-medium hover:border-slate-600 transition-colors",
-								children: [
-									"Apply ",
-									testPct,
-									"% to Media"
-								]
-							})
-						]
-					}),
-					probeData && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "bg-[#0B111A] border border-slate-800 rounded-xl p-4 space-y-2 text-xs",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex flex-wrap items-center gap-x-4 gap-y-1 font-mono-tabular text-slate-200",
-							children: [
-								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["AudioMode: ", probeData.audioMode] }),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["Ringer: ", probeData.ringerMode] }),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["Speakerphone: ", probeData.isSpeakerphoneOn ? "ON" : "OFF"] }),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["BT SCO: ", probeData.isBluetoothScoOn ? "ON" : "OFF"] })
-							]
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-							className: "text-slate-400",
-							children: probeData.audioMode === "MODE_IN_COMMUNICATION" ? "Active VoIP communication session detected (WhatsApp/VoIP call). Android typically maps hardware volume keys to STREAM_VOICE_CALL in this mode." : probeData.native ? "No active VoIP session detected (MODE_NORMAL). Start a WhatsApp voice call and tap Probe Live Audio Mode again to confirm." : "Web preview mode: live AudioManager.getMode() inspection requires the installed Android APK."
-						})]
-					})
-				]
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
-				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-3",
-				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-						className: "flex items-start justify-between gap-3",
-						children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "flex items-start gap-2.5",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Power, { className: "w-5 h-5 text-cyan-400 shrink-0 mt-0.5" }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
-								className: "text-base font-semibold text-slate-100",
-								children: "Reboot & App-Update Persistence Test"
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "text-xs text-slate-400 mt-0.5",
-								children: "Native BootCompletedReceiver restores all AlarmManager schedules after restart"
-							})] })]
-						})
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs",
-						children: [
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "bg-[#0B111A] border border-slate-800 rounded-xl p-3.5",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "text-slate-400",
-									children: "Receiver Component"
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "font-semibold text-slate-100 mt-1 flex items-center gap-1.5",
-									children: isNative && permissions.bootReceiverRegistered ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleCheck, { className: "w-3.5 h-3.5 text-emerald-400 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Registered" })] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(TriangleAlert, { className: "w-3.5 h-3.5 text-amber-400 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: isNative ? "Disabled" : "APK Required" })] })
-								})]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "bg-[#0B111A] border border-slate-800 rounded-xl p-3.5",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "text-slate-400",
-									children: "Last Boot Restore"
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "font-mono-tabular font-semibold text-slate-100 mt-1",
-									children: formatTimestamp(bootRestore.lastBootRestoreAt)
-								})]
-							}),
-							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "bg-[#0B111A] border border-slate-800 rounded-xl p-3.5",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "text-slate-400",
-									children: "Restored Rules"
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-									className: "font-mono-tabular font-semibold text-slate-100 mt-1",
-									children: bootRestore.lastBootRestoreAt > 0 ? `${bootRestore.lastBootRestoredCount} (${bootRestore.lastBootRestoreReason})` : "Awaiting first reboot"
-								})]
-							})
-						]
-					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "text-xs text-slate-400 leading-relaxed",
-						children: "To verify on your Vivo T5x 5G: ensure Battery Optimization is unrestricted in Permissions, restart the phone, unlock once, and reopen this screen—the Last Boot Restore timestamp above will update automatically from native SharedPreferences."
-					})
-				]
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
-				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-3",
-				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "flex items-center justify-between gap-3",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
-						className: "text-base font-semibold text-slate-100",
-						children: "Native Execution History"
-					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-						className: "text-xs text-slate-400 mt-0.5",
-						children: "Real outcomes recorded by Android VolumeSchedulerStorage"
-					})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-						type: "button",
-						onClick: () => void onRefreshLogs(),
-						className: "min-h-[40px] px-3 py-1.5 rounded-lg bg-[#0B111A] border border-slate-800 text-xs text-slate-300 hover:text-cyan-300",
-						children: "Refresh"
-					})]
-				}), logs.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-					className: "text-xs text-slate-400 py-4 text-center",
-					children: isNative ? "No native executions recorded yet. Run a stream test or schedule a 10s test alarm above." : "Execution logs populate from native SharedPreferences when running inside the Android APK."
-				}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-					className: "divide-y divide-slate-800/80",
-					children: logs.slice(0, 12).map((entry) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "py-3 flex items-start justify-between gap-3 text-xs",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "min-w-0 space-y-0.5",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "flex items-center gap-2 font-medium text-slate-200",
-								children: [
-									entry.success ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleCheck, { className: "w-3.5 h-3.5 text-emerald-400 shrink-0" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleX, { className: "w-3.5 h-3.5 text-rose-400 shrink-0" }),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: entry.source }),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-										className: "text-slate-600",
-										"aria-hidden": "true",
-										children: "·"
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-										className: "text-cyan-300",
-										children: getStreamLabel(entry.stream)
-									})
-								]
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-								className: "text-slate-400 leading-relaxed",
-								children: entry.message
-							})]
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-							className: "font-mono-tabular text-slate-500 shrink-0 text-right",
-							children: formatTimestamp(entry.timestamp)
-						})]
-					}, entry.id))
 				})]
 			})
 		]
@@ -14137,9 +13274,73 @@ var SystemBarsPluginWeb = class extends WebPlugin {
 registerPlugin("SystemBars", { web: () => new SystemBarsPluginWeb() });
 // src/native/volumeScheduler.ts
 var NativeVolumeScheduler = registerPlugin("VolumeSchedulerPlugin");
-var WEB_STORAGE_KEY = "smart_volume_scheduler_web_preview_v1";
+var WEB_STORAGE_KEY = "smart_volume_scheduler_web_preview_v2";
 function isNativeAndroid() {
 	return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+}
+function createDefaultStreamsMap(overrides = {}) {
+	return {
+		media: overrides.media ?? {
+			enabled: false,
+			percentage: 70
+		},
+		ringtone: overrides.ringtone ?? {
+			enabled: false,
+			percentage: 70
+		},
+		notification: overrides.notification ?? {
+			enabled: false,
+			percentage: 70
+		},
+		alarm: overrides.alarm ?? {
+			enabled: false,
+			percentage: 70
+		},
+		voice_call: overrides.voice_call ?? {
+			enabled: false,
+			percentage: 70
+		}
+	};
+}
+function normalizeSchedule(raw) {
+	const streams = createDefaultStreamsMap();
+	if (raw.streams) [
+		"media",
+		"ringtone",
+		"notification",
+		"alarm",
+		"voice_call"
+	].forEach((k) => {
+		const entry = raw.streams?.[k];
+		if (entry) streams[k] = {
+			enabled: Boolean(entry.enabled),
+			percentage: Math.min(100, Math.max(0, Math.round(entry.percentage ?? 70)))
+		};
+	});
+	else if (raw.stream) streams[raw.stream] = {
+		enabled: true,
+		percentage: Math.min(100, Math.max(0, Math.round(raw.percentage ?? 80)))
+	};
+	return {
+		id: raw.id || `sched-${Date.now()}`,
+		label: raw.label ?? "",
+		time: raw.time ?? "08:00",
+		streams,
+		days: Array.isArray(raw.days) && raw.days.length > 0 ? [...raw.days].sort() : [
+			0,
+			1,
+			2,
+			3,
+			4,
+			5,
+			6
+		],
+		enabled: raw.enabled ?? true,
+		nextTriggerAt: raw.nextTriggerAt ?? 0,
+		lastExecutedAt: raw.lastExecutedAt ?? 0,
+		lastExecutionSuccess: raw.lastExecutionSuccess ?? true,
+		lastExecutionMessage: raw.lastExecutionMessage ?? ""
+	};
 }
 function computeNextLocalTrigger(time, days) {
 	const [hStr, mStr] = time.split(":");
@@ -14170,8 +13371,16 @@ function loadWebPreviewState() {
 			id: "default-day-0800",
 			label: "Day Mode",
 			time: "08:00",
-			stream: "ringtone",
-			percentage: 100,
+			streams: createDefaultStreamsMap({
+				ringtone: {
+					enabled: true,
+					percentage: 100
+				},
+				notification: {
+					enabled: true,
+					percentage: 100
+				}
+			}),
 			days: [
 				0,
 				1,
@@ -14198,8 +13407,16 @@ function loadWebPreviewState() {
 			id: "default-night-2000",
 			label: "Night Mode",
 			time: "20:00",
-			stream: "ringtone",
-			percentage: 50,
+			streams: createDefaultStreamsMap({
+				ringtone: {
+					enabled: true,
+					percentage: 50
+				},
+				notification: {
+					enabled: true,
+					percentage: 50
+				}
+			}),
 			days: [
 				0,
 				1,
@@ -14231,10 +13448,13 @@ function loadWebPreviewState() {
 			return defaultState;
 		}
 		const parsed = JSON.parse(raw);
-		const schedules = (parsed.schedules || []).map((s) => ({
-			...s,
-			nextTriggerAt: parsed.schedulerEnabled && s.enabled ? computeNextLocalTrigger(s.time, s.days) : 0
-		}));
+		const schedules = (parsed.schedules || []).map((item) => {
+			const normalized = normalizeSchedule(item);
+			return {
+				...normalized,
+				nextTriggerAt: parsed.schedulerEnabled && normalized.enabled ? computeNextLocalTrigger(normalized.time, normalized.days) : 0
+			};
+		});
 		return {
 			schedulerEnabled: Boolean(parsed.schedulerEnabled),
 			schedules: schedules.sort((a, b) => a.time.localeCompare(b.time))
@@ -14250,6 +13470,14 @@ function saveWebPreviewState(state) {
 }
 function getPreviewUnobservedStreams() {
 	return {
+		media: {
+			stream: "media",
+			label: "Media",
+			currentIndex: 0,
+			minIndex: 0,
+			maxIndex: 15,
+			percentage: 0
+		},
 		ringtone: {
 			stream: "ringtone",
 			label: "Ringtone",
@@ -14269,14 +13497,6 @@ function getPreviewUnobservedStreams() {
 		alarm: {
 			stream: "alarm",
 			label: "Alarm",
-			currentIndex: 0,
-			minIndex: 0,
-			maxIndex: 15,
-			percentage: 0
-		},
-		media: {
-			stream: "media",
-			label: "Media",
 			currentIndex: 0,
 			minIndex: 0,
 			maxIndex: 15,
@@ -14311,6 +13531,7 @@ function buildWebSettings() {
 			lastBootRestoredCount: 0
 		},
 		recentLogs: [],
+		lastTestAlarmResult: null,
 		deviceInfo: null
 	};
 }
@@ -14336,17 +13557,22 @@ function buildWebPermissionStatus() {
 		postNotifications: {
 			granted: false,
 			required: false,
-			detail: "Unavailable in web browser. Optional runtime permission on Android 13+."
+			detail: "Optional permission (not required for volume scheduling or testing)."
 		},
 		bootReceiverRegistered: false
 	};
 }
 var volumeScheduler = {
 	async getVolumeSettings() {
-		if (isNativeAndroid()) return {
-			...await NativeVolumeScheduler.getVolumeSettings(),
-			native: true
-		};
+		if (isNativeAndroid()) {
+			const res = await NativeVolumeScheduler.getVolumeSettings();
+			return {
+				...res,
+				native: true,
+				schedules: (res.schedules || []).map((s) => normalizeSchedule(s)),
+				nextScheduledChange: res.nextScheduledChange ? normalizeSchedule(res.nextScheduledChange) : null
+			};
+		}
 		return buildWebSettings();
 	},
 	async setVolume(stream, percentage, showUi = false) {
@@ -14367,11 +13593,17 @@ var volumeScheduler = {
 			maxIndex: 15,
 			dndBlocked: false,
 			fixedVolume: false,
-			message: "Browser preview cannot modify Android AudioManager streams. Build and install the Android APK to apply real system volume changes."
+			message: "Browser preview cannot modify Android AudioManager streams. Install the Android APK to apply real system volume changes."
 		};
 	},
 	async scheduleVolumeChange(params) {
-		if (isNativeAndroid()) return NativeVolumeScheduler.scheduleVolumeChange(params);
+		if (isNativeAndroid()) {
+			const res = await NativeVolumeScheduler.scheduleVolumeChange(params);
+			return {
+				...res,
+				schedule: normalizeSchedule(res.schedule)
+			};
+		}
 		const state = loadWebPreviewState();
 		const id = params.id || `sched-${Date.now()}`;
 		const existing = state.schedules.find((s) => s.id === id);
@@ -14385,19 +13617,18 @@ var volumeScheduler = {
 			5,
 			6
 		];
-		const updatedSchedule = {
+		const updatedSchedule = normalizeSchedule({
 			id,
 			label: (params.label ?? existing?.label ?? "").trim(),
 			time: params.time,
-			stream: params.stream,
-			percentage: Math.min(100, Math.max(0, Math.round(params.percentage))),
+			streams: params.streams,
 			days,
 			enabled,
 			nextTriggerAt: state.schedulerEnabled && enabled ? computeNextLocalTrigger(params.time, days) : 0,
 			lastExecutedAt: existing?.lastExecutedAt ?? 0,
 			lastExecutionSuccess: existing?.lastExecutionSuccess ?? true,
 			lastExecutionMessage: existing?.lastExecutionMessage ?? ""
-		};
+		});
 		const nextList = state.schedules.some((s) => s.id === id) ? state.schedules.map((s) => s.id === id ? updatedSchedule : s) : [...state.schedules, updatedSchedule];
 		saveWebPreviewState({
 			schedulerEnabled: state.schedulerEnabled,
@@ -14409,11 +13640,18 @@ var volumeScheduler = {
 			scheduled: false,
 			exact: false,
 			mode: "web_preview",
-			message: "Saved in web preview storage. Native AlarmManager scheduling activates when running the Android APK."
+			message: "Saved in web preview storage. Native AlarmManager scheduling activates inside the Android APK."
 		};
 	},
 	async getScheduledChanges() {
-		if (isNativeAndroid()) return NativeVolumeScheduler.getScheduledChanges();
+		if (isNativeAndroid()) {
+			const res = await NativeVolumeScheduler.getScheduledChanges();
+			return {
+				...res,
+				schedules: (res.schedules || []).map((s) => normalizeSchedule(s)),
+				nextScheduledChange: res.nextScheduledChange ? normalizeSchedule(res.nextScheduledChange) : null
+			};
+		}
 		const settings = buildWebSettings();
 		return {
 			schedulerEnabled: settings.schedulerEnabled,
@@ -14422,7 +13660,13 @@ var volumeScheduler = {
 		};
 	},
 	async deleteScheduledChange(id) {
-		if (isNativeAndroid()) return NativeVolumeScheduler.deleteScheduledChange({ id });
+		if (isNativeAndroid()) {
+			const res = await NativeVolumeScheduler.deleteScheduledChange({ id });
+			return {
+				...res,
+				schedules: (res.schedules || []).map((s) => normalizeSchedule(s))
+			};
+		}
 		const state = loadWebPreviewState();
 		const remaining = state.schedules.filter((s) => s.id !== id);
 		saveWebPreviewState({
@@ -14436,10 +13680,16 @@ var volumeScheduler = {
 		};
 	},
 	async toggleScheduleEnabled(id, enabled) {
-		if (isNativeAndroid()) return NativeVolumeScheduler.toggleScheduleEnabled({
-			id,
-			enabled
-		});
+		if (isNativeAndroid()) {
+			const res = await NativeVolumeScheduler.toggleScheduleEnabled({
+				id,
+				enabled
+			});
+			return {
+				...res,
+				schedule: normalizeSchedule(res.schedule)
+			};
+		}
 		const state = loadWebPreviewState();
 		let updated = null;
 		const nextList = state.schedules.map((s) => {
@@ -14523,31 +13773,30 @@ var volumeScheduler = {
 			status: buildWebPermissionStatus()
 		};
 	},
-	async testVolumeStream(stream, percentage, playTone = true) {
+	async testVolumeStream(stream, percentage) {
 		if (isNativeAndroid()) return NativeVolumeScheduler.testVolumeStream({
 			stream,
-			percentage,
-			playTone
+			percentage
 		});
 		return {
-			applyResult: {
-				success: false,
-				appliedExactTarget: false,
-				stream,
-				requestedPercentage: percentage ?? 0,
-				targetIndex: 0,
-				actualIndex: 0,
-				actualPercentage: 0,
-				minIndex: 0,
-				maxIndex: 15,
-				dndBlocked: false,
-				fixedVolume: false,
-				message: "Native AudioManager stream test failed: running in web browser, not Android Capacitor runtime."
-			},
-			tonePlayed: false,
-			toneMessage: "Audio probe requires native Android AudioManager.",
+			stream,
+			requestedPercentage: percentage ?? 0,
+			targetIndex: 0,
+			actualIndex: 0,
+			minIndex: 0,
+			maxIndex: 15,
+			actualPercentage: 0,
+			volumeApplied: false,
+			playbackStarted: false,
+			streamVerified: false,
+			callSessionActive: false,
 			audioMode: "WEB_PREVIEW",
-			ringerMode: "normal"
+			ringerMode: "normal",
+			dndBlocked: false,
+			fixedVolume: false,
+			source: "FOREGROUND_TEST",
+			timestamp: Date.now(),
+			message: "Native AudioManager stream test failed: running in web browser, not Android Capacitor runtime."
 		};
 	},
 	async scheduleTestAlarm(secondsFromNow, stream, percentage) {
@@ -14572,7 +13821,8 @@ var volumeScheduler = {
 				lastBootRestoreAt: 0,
 				lastBootRestoreReason: "",
 				lastBootRestoredCount: 0
-			}
+			},
+			lastTestAlarmResult: null
 		};
 	},
 	async getAudioModeProbe() {
@@ -14594,12 +13844,1050 @@ var volumeScheduler = {
 		if (!isNativeAndroid()) return () => {};
 		const handle = await NativeVolumeScheduler.addListener("volumeStateChanged", (state) => callback({
 			...state,
-			native: true
+			native: true,
+			schedules: (state.schedules || []).map((s) => normalizeSchedule(s)),
+			nextScheduledChange: state.nextScheduledChange ? normalizeSchedule(state.nextScheduledChange) : null
 		}));
 		return () => {
 			handle.remove();
 		};
 	}
+};
+// src/components/ScheduleFormSheet.tsx
+var ScheduleFormSheet = ({ open, initialSchedule, saving, onClose, onSave }) => {
+	const [label, setLabel] = (0, import_react.useState)("");
+	const [time, setTime] = (0, import_react.useState)("08:00");
+	const [streams, setStreams] = (0, import_react.useState)(() => createDefaultStreamsMap({
+		ringtone: {
+			enabled: true,
+			percentage: 80
+		},
+		notification: {
+			enabled: true,
+			percentage: 80
+		}
+	}));
+	const [days, setDays] = (0, import_react.useState)([
+		0,
+		1,
+		2,
+		3,
+		4,
+		5,
+		6
+	]);
+	const [enabled, setEnabled] = (0, import_react.useState)(true);
+	const [error, setError] = (0, import_react.useState)("");
+	(0, import_react.useEffect)(() => {
+		if (!open) return;
+		if (initialSchedule) {
+			setLabel(initialSchedule.label);
+			setTime(initialSchedule.time);
+			setStreams(createDefaultStreamsMap({
+				media: { ...initialSchedule.streams.media },
+				ringtone: { ...initialSchedule.streams.ringtone },
+				notification: { ...initialSchedule.streams.notification },
+				alarm: { ...initialSchedule.streams.alarm },
+				voice_call: { ...initialSchedule.streams.voice_call }
+			}));
+			setDays(initialSchedule.days.length > 0 ? [...initialSchedule.days] : [
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6
+			]);
+			setEnabled(initialSchedule.enabled);
+		} else {
+			setLabel("");
+			setTime("08:00");
+			setStreams(createDefaultStreamsMap({
+				media: {
+					enabled: false,
+					percentage: 50
+				},
+				ringtone: {
+					enabled: true,
+					percentage: 80
+				},
+				notification: {
+					enabled: true,
+					percentage: 80
+				},
+				alarm: {
+					enabled: false,
+					percentage: 80
+				},
+				voice_call: {
+					enabled: false,
+					percentage: 60
+				}
+			}));
+			setDays([
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6
+			]);
+			setEnabled(true);
+		}
+		setError("");
+	}, [open, initialSchedule]);
+	if (!open) return null;
+	const toggleDay = (dayIndex) => {
+		setDays((prev) => {
+			if (prev.includes(dayIndex)) {
+				if (prev.length === 1) return prev;
+				return prev.filter((d) => d !== dayIndex);
+			}
+			return [...prev, dayIndex].sort((a, b) => a - b);
+		});
+	};
+	const toggleStreamEnabled = (key) => {
+		setStreams((prev) => ({
+			...prev,
+			[key]: {
+				...prev[key],
+				enabled: !prev[key].enabled
+			}
+		}));
+	};
+	const updateStreamPercentage = (key, pct) => {
+		const clamped = Math.min(100, Math.max(0, Math.round(pct)));
+		setStreams((prev) => ({
+			...prev,
+			[key]: {
+				enabled: true,
+				percentage: clamped
+			}
+		}));
+	};
+	const handleSubmit = async (e) => {
+		e.preventDefault();
+		if (!/^\d{2}:\d{2}$/.test(time)) {
+			setError("Enter a valid local time in HH:mm format.");
+			return;
+		}
+		if (days.length === 0) {
+			setError("Select at least one weekday.");
+			return;
+		}
+		if (!STREAM_OPTIONS.some((opt) => streams[opt.key]?.enabled)) {
+			setError("Enable at least one audio stream for this rule.");
+			return;
+		}
+		setError("");
+		await onSave({
+			id: initialSchedule?.id,
+			label: label.trim(),
+			time,
+			streams,
+			days,
+			enabled
+		});
+	};
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+		className: "fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm",
+		role: "dialog",
+		"aria-modal": "true",
+		"aria-labelledby": "schedule-sheet-title",
+		children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "w-full sm:max-w-xl max-h-[92dvh] flex flex-col bg-[#121A26] border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden",
+			children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "sm:hidden w-10 h-1.5 bg-slate-700 rounded-full mx-auto mt-3 shrink-0" }),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "flex items-center justify-between px-5 py-4 border-b border-slate-800/80 shrink-0",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+						id: "schedule-sheet-title",
+						className: "text-lg font-semibold text-slate-100",
+						children: initialSchedule ? "Edit Schedule Rule" : "New Volume Schedule"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+						className: "text-xs text-slate-400 mt-0.5",
+						children: [
+							"Triggers automatically at ",
+							formatTime12h(time),
+							" local time · Disabled streams stay unchanged"
+						]
+					})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						type: "button",
+						onClick: onClose,
+						className: "min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 transition-colors",
+						"aria-label": "Close schedule editor",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-5 h-5" })
+					})]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("form", {
+					onSubmit: handleSubmit,
+					className: "flex-1 overflow-y-auto px-5 py-5 space-y-5",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
+							htmlFor: "schedule-label",
+							className: "block text-sm font-medium text-slate-300 mb-2",
+							children: "Profile Label"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+							id: "schedule-label",
+							type: "text",
+							maxLength: 40,
+							value: label,
+							onChange: (e) => setLabel(e.target.value),
+							placeholder: "e.g. Workday Balanced or Night Quiet",
+							className: "w-full min-h-[46px] px-3.5 py-2.5 rounded-xl bg-[#0B111A] border border-slate-700/80 text-slate-100 placeholder:text-slate-500 text-sm focus:outline-none focus:border-cyan-400"
+						})] }),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "grid grid-cols-1 sm:grid-cols-2 gap-4",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
+								htmlFor: "schedule-time",
+								className: "block text-sm font-medium text-slate-300 mb-2",
+								children: "Trigger Time (Local)"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+								id: "schedule-time",
+								type: "time",
+								required: true,
+								value: time,
+								onChange: (e) => setTime(e.target.value),
+								className: "w-full min-h-[46px] px-3.5 py-2.5 rounded-xl bg-[#0B111A] border border-slate-700/80 text-slate-100 font-mono-tabular text-base focus:outline-none focus:border-cyan-400"
+							})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "block text-sm font-medium text-slate-300 mb-2",
+								children: "Rule State"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+								type: "button",
+								onClick: () => setEnabled((v) => !v),
+								className: `w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border text-sm font-medium flex items-center justify-between transition-colors ${enabled ? "bg-cyan-500/10 border-cyan-400/50 text-cyan-300" : "bg-[#0B111A] border-slate-700/80 text-slate-400"}`,
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: enabled ? "Enabled" : "Disabled" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "font-mono-tabular text-xs",
+									children: enabled ? "ON" : "OFF"
+								})]
+							})] })]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "space-y-3",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-center justify-between",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-sm font-medium text-slate-300",
+									children: "Audio Stream Targets"
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-xs text-slate-400",
+									children: "Independent per stream"
+								})]
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "space-y-2.5",
+								children: STREAM_OPTIONS.map((opt) => {
+									const cfg = streams[opt.key];
+									const isStreamOn = cfg.enabled;
+									return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: `rounded-xl border p-3.5 transition-colors ${isStreamOn ? "bg-[#0B111A] border-slate-700" : "bg-[#0B111A]/60 border-slate-800/80 opacity-75"}`,
+										children: [
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+												className: "flex items-center justify-between gap-3",
+												children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+													className: "min-w-0",
+													children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+														className: "text-sm font-semibold text-slate-100",
+														children: opt.label
+													}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+														className: "text-xs text-slate-400 truncate",
+														children: isStreamOn ? opt.description : "Unchanged when this rule fires"
+													})]
+												}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+													className: "flex items-center gap-3 shrink-0",
+													children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+														className: `font-mono-tabular text-sm font-semibold w-11 text-right ${isStreamOn ? "text-cyan-300" : "text-slate-500"}`,
+														children: isStreamOn ? `${cfg.percentage}%` : "Skip"
+													}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+														type: "button",
+														role: "switch",
+														"aria-checked": isStreamOn,
+														"aria-label": `Toggle ${opt.label} in rule`,
+														onClick: () => toggleStreamEnabled(opt.key),
+														className: "min-h-[44px] min-w-[48px] flex items-center justify-end",
+														children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+															className: `w-11 h-6 rounded-full p-0.5 transition-colors flex items-center ${isStreamOn ? "bg-cyan-400 justify-end" : "bg-slate-700 justify-start"}`,
+															children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "w-5 h-5 rounded-full bg-[#0B111A] shadow" })
+														})
+													})]
+												})]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+												className: "mt-2.5 flex items-center gap-3",
+												children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+													type: "range",
+													min: 0,
+													max: 100,
+													step: 1,
+													value: cfg.percentage,
+													"aria-label": `${opt.label} volume percentage`,
+													onChange: (e) => updateStreamPercentage(opt.key, Number(e.target.value)),
+													className: "volume-slider flex-1"
+												})
+											}),
+											opt.key === "voice_call" && isStreamOn && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+												className: "text-[11px] text-slate-400 mt-2",
+												children: "Android typically enforces a minimum non-zero step (≥1) on Voice Call."
+											})
+										]
+									}, opt.key);
+								})
+							})]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-center justify-between mb-2",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "text-sm font-medium text-slate-300",
+								children: "Repeat Weekdays"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-center gap-3 text-xs",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => setDays([
+										0,
+										1,
+										2,
+										3,
+										4,
+										5,
+										6
+									]),
+									className: "text-cyan-400 hover:text-cyan-300 py-1 px-1",
+									children: "Every day"
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => setDays([
+										1,
+										2,
+										3,
+										4,
+										5
+									]),
+									className: "text-slate-400 hover:text-slate-200 py-1 px-1",
+									children: "Weekdays"
+								})]
+							})]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "grid grid-cols-7 gap-1.5",
+							children: WEEKDAY_LABELS.map((dayName, idx) => {
+								const selected = days.includes(idx);
+								return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => toggleDay(idx),
+									className: `min-h-[44px] rounded-xl text-xs font-medium border transition-colors ${selected ? "bg-cyan-400 text-[#0B111A] border-cyan-400 font-semibold" : "bg-[#0B111A] text-slate-400 border-slate-800 hover:border-slate-700"}`,
+									"aria-pressed": selected,
+									children: dayName
+								}, dayName);
+							})
+						})] }),
+						error && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "text-sm text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3.5 py-2.5",
+							children: error
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "pt-2 flex items-center gap-3 border-t border-slate-800/80",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+								type: "button",
+								onClick: onClose,
+								className: "flex-1 min-h-[48px] px-4 py-2.5 rounded-xl border border-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-800/60 transition-colors",
+								children: "Cancel"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+								type: "submit",
+								disabled: saving,
+								className: "flex-1 min-h-[48px] px-4 py-2.5 rounded-xl bg-cyan-400 text-[#0B111A] text-sm font-semibold hover:bg-cyan-300 disabled:opacity-60 transition-colors",
+								children: saving ? "Saving..." : initialSchedule ? "Save Changes" : "Save Schedule"
+							})]
+						})
+					]
+				})
+			]
+		})
+	});
+};
+// src/components/SchedulesTab.tsx
+var SchedulesTab = ({ schedules, schedulerEnabled, busyId, onAdd, onEdit, onDelete, onToggleRule }) => {
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "space-y-5",
+		children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "flex flex-col sm:flex-row sm:items-center justify-between gap-3",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+					className: "text-lg font-semibold text-slate-100",
+					children: "Volume Schedules"
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "text-xs text-slate-400 mt-0.5",
+					children: "Each rule applies its enabled streams independently via native Android AlarmManager. Disabled streams stay untouched."
+				})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+					type: "button",
+					onClick: onAdd,
+					className: "min-h-[44px] px-4 py-2 rounded-xl bg-cyan-400 text-[#0B111A] text-sm font-semibold hover:bg-cyan-300 transition-colors flex items-center justify-center gap-2 whitespace-nowrap shrink-0",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Plus, { className: "w-4 h-4" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Add Schedule" })]
+				})]
+			}),
+			!schedulerEnabled && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+				className: "bg-amber-500/10 border border-amber-500/30 rounded-2xl px-4 py-3 text-xs text-amber-200",
+				children: "Master scheduler is currently paused. Individual rules remain saved locally and will resume once you enable the scheduler."
+			}),
+			schedules.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-8 text-center space-y-3",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CalendarClock, { className: "w-8 h-8 text-slate-500 mx-auto" }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "text-sm font-medium text-slate-200",
+						children: "No volume schedules configured"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "text-xs text-slate-400 max-w-sm mx-auto",
+						children: "Add a daily or weekday schedule to adjust Media, Ringtone, Notification, Alarm, or Voice Call levels automatically."
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						type: "button",
+						onClick: onAdd,
+						className: "min-h-[44px] px-5 py-2 rounded-xl bg-cyan-400 text-[#0B111A] text-sm font-semibold hover:bg-cyan-300 transition-colors",
+						children: "Create First Schedule"
+					})
+				]
+			}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+				className: "grid grid-cols-1 md:grid-cols-2 gap-3.5",
+				children: schedules.map((item) => {
+					const isBusy = busyId === item.id;
+					const enabledStreams = STREAM_OPTIONS.filter((opt) => item.streams[opt.key]?.enabled);
+					return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: `bg-[#121A26] border rounded-2xl p-4 flex flex-col justify-between gap-4 transition-colors ${item.enabled ? "border-slate-800/90" : "border-slate-800/50 opacity-75"}`,
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "space-y-3",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-start justify-between gap-3",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "min-w-0",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "flex items-baseline gap-2.5 flex-wrap",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+											className: "text-2xl font-bold font-mono-tabular text-slate-100",
+											children: formatTime12h(item.time)
+										}), item.label && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+											className: "text-sm font-medium text-slate-300 truncate",
+											children: item.label
+										})]
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "text-xs text-slate-400 mt-1",
+										children: formatDaysSummary(item.days)
+									})]
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									role: "switch",
+									"aria-checked": item.enabled,
+									"aria-label": `Toggle ${item.label || item.time} schedule`,
+									disabled: isBusy,
+									onClick: () => void onToggleRule(item.id, !item.enabled),
+									className: "min-h-[44px] min-w-[52px] flex items-center justify-end shrink-0",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+										className: `w-12 h-7 rounded-full p-1 transition-colors flex items-center ${item.enabled ? "bg-cyan-400 justify-end" : "bg-slate-700 justify-start"}`,
+										children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "w-5 h-5 rounded-full bg-[#0B111A] shadow" })
+									})
+								})]
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-slate-800/70 text-xs",
+								children: enabledStreams.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-slate-500 col-span-2",
+									children: "No streams enabled"
+								}) : enabledStreams.map((opt) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "flex items-center justify-between gap-2",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+										className: "text-slate-400 truncate",
+										children: opt.label
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+										className: "font-mono-tabular font-semibold text-cyan-300",
+										children: [item.streams[opt.key].percentage, "%"]
+									})]
+								}, opt.key))
+							})]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "text-xs text-slate-400 min-w-0",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "truncate font-mono-tabular",
+									children: schedulerEnabled && item.enabled ? formatTriggerRelative(item.nextTriggerAt) : "Not queued"
+								}), item.lastExecutedAt > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: `truncate mt-0.5 ${item.lastExecutionSuccess ? "text-slate-500" : "text-rose-400"}`,
+									title: item.lastExecutionMessage,
+									children: [
+										"Last run: ",
+										formatTimestamp(item.lastExecutedAt),
+										item.lastExecutionMessage ? ` · ${item.lastExecutionMessage}` : ""
+									]
+								})]
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-center gap-1 shrink-0",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => onEdit(item),
+									disabled: isBusy,
+									className: "min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-300 hover:text-cyan-300 hover:bg-slate-800/70 transition-colors",
+									"aria-label": `Edit schedule ${item.label || item.time}`,
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PenLine, { className: "w-4 h-4" })
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => void onDelete(item.id),
+									disabled: isBusy,
+									className: "min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors",
+									"aria-label": `Delete schedule ${item.label || item.time}`,
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Trash2, { className: "w-4 h-4" })
+								})]
+							})]
+						})]
+					}, item.id);
+				})
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-4 text-xs text-slate-400 leading-relaxed",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+					className: "font-semibold text-slate-200",
+					children: "Persistent volume behavior: "
+				}), "Applied levels remain in place until another scheduled rule fires or you adjust device volume manually. Unchecked streams in a rule are left untouched."]
+			})
+		]
+	});
+};
+// src/components/TestingTab.tsx
+var TestResultCard = ({ title, result }) => {
+	const isVoiceCall = result.stream === "voice_call";
+	const badgeColor = !result.volumeApplied ? "bg-rose-500/10 border-rose-500/30 text-rose-100" : result.streamVerified ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-100" : "bg-amber-500/10 border-amber-500/35 text-amber-100";
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: `rounded-xl border p-4 text-xs space-y-2.5 ${badgeColor}`,
+		children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "flex items-center justify-between gap-2",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "flex items-center gap-2 font-semibold text-sm",
+					children: [!result.volumeApplied ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleX, { className: "w-4 h-4 text-rose-400 shrink-0" }) : result.streamVerified ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleCheck, { className: "w-4 h-4 text-emerald-400 shrink-0" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TriangleAlert, { className: "w-4 h-4 text-amber-400 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+						title,
+						": ",
+						getStreamLabel(result.stream)
+					] })]
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+					className: "font-mono-tabular opacity-75",
+					children: formatTimestamp(result.timestamp)
+				})]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "leading-relaxed opacity-95",
+				children: result.message
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1.5 border-t border-white/10 font-mono-tabular",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "opacity-70 block",
+						children: "Requested"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+						className: "font-semibold",
+						children: [result.requestedPercentage, "%"]
+					})] }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "opacity-70 block",
+						children: "Actual Index"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+						className: "font-semibold",
+						children: [
+							result.actualIndex,
+							" / ",
+							result.maxIndex
+						]
+					})] }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "opacity-70 block",
+						children: "Actual Achievable"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+						className: "font-semibold",
+						children: [result.actualPercentage, "%"]
+					})] }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "opacity-70 block",
+						children: "Volume Applied"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-semibold",
+						children: result.volumeApplied ? "Yes" : "No"
+					})] }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "opacity-70 block",
+						children: "Playback Started"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-semibold",
+						children: isVoiceCall ? "N/A (No substitute)" : result.playbackStarted ? "Yes" : "No"
+					})] }),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "opacity-70 block",
+						children: "Stream Verified"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-semibold",
+						children: result.streamVerified ? "Verified" : "Unverified"
+					})] })
+				]
+			}),
+			isVoiceCall && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+				className: "text-[11px] opacity-85",
+				children: [
+					"Audio Mode: ",
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-mono-tabular",
+						children: result.audioMode
+					}),
+					" ·",
+					" ",
+					result.callSessionActive ? "Active call/communication session detected." : "No call session active — verify actual call loudness during a live phone or VoIP call."
+				]
+			})
+		]
+	});
+};
+var TestingTab = ({ isNative, permissions, bootRestore, logs, lastTestAlarmResult, onTestStream, onScheduleTestAlarm, onProbeAudioMode, onRefreshLogs }) => {
+	const [testPct, setTestPct] = (0, import_react.useState)(65);
+	const [testingStream, setTestingStream] = (0, import_react.useState)(null);
+	const [streamResult, setStreamResult] = (0, import_react.useState)(null);
+	const [alarmStream, setAlarmStream] = (0, import_react.useState)("media");
+	const [alarmPct, setAlarmPct] = (0, import_react.useState)(60);
+	const [alarmDelay, setAlarmDelay] = (0, import_react.useState)(10);
+	const [alarmDispatch, setAlarmDispatch] = (0, import_react.useState)(null);
+	const [schedulingAlarm, setSchedulingAlarm] = (0, import_react.useState)(false);
+	const [probeData, setProbeData] = (0, import_react.useState)(null);
+	const [probing, setProbing] = (0, import_react.useState)(false);
+	const handleRunStreamTest = async (stream) => {
+		setTestingStream(stream);
+		try {
+			const res = await onTestStream(stream, testPct);
+			setStreamResult(res);
+		} finally {
+			setTestingStream(null);
+		}
+	};
+	const handleRunAlarmTest = async () => {
+		setSchedulingAlarm(true);
+		try {
+			const res = await onScheduleTestAlarm(alarmDelay, alarmStream, alarmPct);
+			setAlarmDispatch(res);
+		} finally {
+			setSchedulingAlarm(false);
+		}
+	};
+	const handleProbe = async () => {
+		setProbing(true);
+		try {
+			const res = await onProbeAudioMode();
+			setProbeData(res);
+		} finally {
+			setProbing(false);
+		}
+	};
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "space-y-6",
+		children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex flex-col sm:flex-row sm:items-center justify-between gap-3",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+							className: "text-base font-semibold text-slate-100",
+							children: "Hardware Audio Stream Verification"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "text-xs text-slate-400 mt-0.5",
+							children: "Applies the percentage via AudioManager, runs real stream-specific playback (or call-session inspection for Voice Call), and reads back the actual hardware index."
+						})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "flex items-center gap-2 shrink-0",
+							children: [
+								25,
+								50,
+								75,
+								100
+							].map((pct) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+								type: "button",
+								onClick: () => setTestPct(pct),
+								className: `min-h-[40px] px-3 rounded-lg text-xs font-mono-tabular font-medium border transition-colors ${testPct === pct ? "bg-cyan-400 text-[#0B111A] border-cyan-400 font-semibold" : "bg-[#0B111A] text-slate-300 border-slate-800 hover:border-slate-700"}`,
+								children: [pct, "%"]
+							}, pct))
+						})]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+						className: "grid grid-cols-1 sm:grid-cols-2 gap-3",
+						children: [
+							{
+								key: "media",
+								label: "Test Media Volume",
+								note: "STREAM_MUSIC · Bundled WAV file"
+							},
+							{
+								key: "ringtone",
+								label: "Test Ringtone Volume",
+								note: "STREAM_RING · Device ringtone audio"
+							},
+							{
+								key: "notification",
+								label: "Test Notification Volume",
+								note: "STREAM_NOTIFICATION · Alert sound"
+							},
+							{
+								key: "alarm",
+								label: "Test Alarm Volume",
+								note: "STREAM_ALARM · Alarm tone"
+							},
+							{
+								key: "voice_call",
+								label: "Test Call Volume",
+								note: "STREAM_VOICE_CALL · Index + session check"
+							}
+						].map((btn) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+							type: "button",
+							disabled: testingStream !== null,
+							onClick: () => void handleRunStreamTest(btn.key),
+							className: "min-h-[56px] px-4 py-3 rounded-xl bg-[#0B111A] border border-slate-800 hover:border-cyan-400/60 text-left flex items-center justify-between gap-3 transition-colors disabled:opacity-60",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "min-w-0",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "text-sm font-medium text-slate-100",
+									children: btn.label
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: "text-xs font-mono-tabular text-slate-400 truncate mt-0.5",
+									children: btn.note
+								})]
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Play, { className: "w-4 h-4 text-cyan-400 shrink-0" })]
+						}, btn.key))
+					}),
+					streamResult && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TestResultCard, {
+						title: "Foreground Test Result",
+						result: streamResult
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-start justify-between gap-3",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+							className: "text-base font-semibold text-slate-100",
+							children: "Test Scheduled Background Execution"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "text-xs text-slate-400 mt-0.5",
+							children: "Queues a native AlarmManager broadcast that executes the selected stream's real native test (no notification substitutes). Lock screen or close the app after starting, then reopen to inspect the recorded result."
+						})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Clock, { className: "w-5 h-5 text-cyan-400 shrink-0" })]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "grid grid-cols-1 sm:grid-cols-3 gap-3",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
+								className: "block text-xs font-medium text-slate-400 mb-1.5",
+								children: "Delay"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "grid grid-cols-2 gap-2",
+								children: [10, 30].map((sec) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+									type: "button",
+									onClick: () => setAlarmDelay(sec),
+									className: `min-h-[44px] rounded-xl text-xs font-mono-tabular font-medium border ${alarmDelay === sec ? "bg-cyan-400 text-[#0B111A] border-cyan-400 font-semibold" : "bg-[#0B111A] text-slate-300 border-slate-800"}`,
+									children: [sec, "s"]
+								}, sec))
+							})] }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
+								htmlFor: "test-alarm-stream",
+								className: "block text-xs font-medium text-slate-400 mb-1.5",
+								children: "Stream"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+								id: "test-alarm-stream",
+								value: alarmStream,
+								onChange: (e) => setAlarmStream(e.target.value),
+								className: "w-full min-h-[44px] px-3 rounded-xl bg-[#0B111A] border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-cyan-400",
+								children: [
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+										value: "media",
+										children: "Media"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+										value: "ringtone",
+										children: "Ringtone"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+										value: "notification",
+										children: "Notification"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+										value: "alarm",
+										children: "Alarm"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+										value: "voice_call",
+										children: "Voice Call"
+									})
+								]
+							})] }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", {
+								htmlFor: "test-alarm-pct",
+								className: "block text-xs font-medium text-slate-400 mb-1.5",
+								children: "Target %"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+								id: "test-alarm-pct",
+								type: "number",
+								min: 0,
+								max: 100,
+								value: alarmPct,
+								onChange: (e) => setAlarmPct(Math.min(100, Math.max(0, Number(e.target.value) || 0))),
+								className: "w-full min-h-[44px] px-3 rounded-xl bg-[#0B111A] border border-slate-800 text-sm font-mono-tabular text-slate-100 focus:outline-none focus:border-cyan-400"
+							})] })
+						]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						type: "button",
+						onClick: () => void handleRunAlarmTest(),
+						disabled: schedulingAlarm,
+						className: "w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl bg-cyan-400 text-[#0B111A] text-sm font-semibold hover:bg-cyan-300 disabled:opacity-60 transition-colors",
+						children: schedulingAlarm ? "Scheduling..." : `Schedule ${getStreamLabel(alarmStream)} Test (${alarmDelay}s)`
+					}),
+					alarmDispatch && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: `rounded-xl border p-4 text-xs space-y-1 ${alarmDispatch.success ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-100" : "bg-rose-500/10 border-rose-500/30 text-rose-200"}`,
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-center gap-2 font-semibold text-sm",
+								children: [alarmDispatch.success ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleCheck, { className: "w-4 h-4 text-emerald-400 shrink-0" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleX, { className: "w-4 h-4 text-rose-400 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: alarmDispatch.success ? `Queued (${alarmDispatch.mode})` : "Test Alarm Failed" })]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								className: "leading-relaxed",
+								children: alarmDispatch.message
+							}),
+							alarmDispatch.nextTriggerAt > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+								className: "font-mono-tabular text-slate-300",
+								children: ["Scheduled fire time: ", formatTimestamp(alarmDispatch.nextTriggerAt)]
+							})
+						]
+					}),
+					lastTestAlarmResult && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TestResultCard, {
+						title: "Last Background Alarm Execution",
+						result: lastTestAlarmResult
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+						className: "flex items-start justify-between gap-3",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-start gap-2.5",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(PhoneCall, { className: "w-5 h-5 text-cyan-400 shrink-0 mt-0.5" }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+								className: "text-base font-semibold text-slate-100",
+								children: "WhatsApp Call Volume Limitation & Live Probe"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								className: "text-xs text-slate-400 mt-0.5",
+								children: "Empirical stream checker for VoIP calls on your device"
+							})] })]
+						})
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "bg-[#0B111A] border border-slate-800 rounded-xl p-4 space-y-2.5 text-xs text-slate-300 leading-relaxed",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-start gap-2 text-amber-300 font-medium",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ShieldAlert, { className: "w-4 h-4 shrink-0 mt-0.5" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Android does not allow third-party apps to isolate WhatsApp-only call volume." })]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [
+								"WhatsApp VoIP calls route audio through Android's shared system streams—typically",
+								" ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "font-mono-tabular text-slate-100",
+									children: "STREAM_VOICE_CALL"
+								}),
+								" when in",
+								" ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "font-mono-tabular text-slate-100",
+									children: "MODE_IN_COMMUNICATION"
+								}),
+								", or Bluetooth/Media routing depending on your headset and Vivo Android 16 audio policy."
+							] }),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [
+								"This app intentionally avoids Accessibility Services, root access, or private API hooks. Use the live probe below while on a WhatsApp call to verify whether ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "font-mono-tabular text-slate-100",
+									children: "Voice Call"
+								}),
+								" or ",
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "font-mono-tabular text-slate-100",
+									children: "Media"
+								}),
+								" changes your call loudness."
+							] })
+						]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex flex-wrap items-center gap-2.5",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+								type: "button",
+								onClick: () => void handleProbe(),
+								disabled: probing,
+								className: "min-h-[44px] px-4 py-2 rounded-xl bg-[#0B111A] border border-cyan-400/50 text-cyan-300 text-xs font-semibold hover:bg-cyan-400/10 transition-colors flex items-center gap-2",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCw, { className: `w-3.5 h-3.5 ${probing ? "animate-spin" : ""}` }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Probe Live Audio Mode" })]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+								type: "button",
+								onClick: () => void handleRunStreamTest("voice_call"),
+								disabled: testingStream !== null,
+								className: "min-h-[44px] px-4 py-2 rounded-xl bg-[#0B111A] border border-slate-700 text-slate-200 text-xs font-medium hover:border-slate-600 transition-colors",
+								children: [
+									"Apply ",
+									testPct,
+									"% to Voice Call"
+								]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+								type: "button",
+								onClick: () => void handleRunStreamTest("media"),
+								disabled: testingStream !== null,
+								className: "min-h-[44px] px-4 py-2 rounded-xl bg-[#0B111A] border border-slate-700 text-slate-200 text-xs font-medium hover:border-slate-600 transition-colors",
+								children: [
+									"Apply ",
+									testPct,
+									"% to Media"
+								]
+							})
+						]
+					}),
+					probeData && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "bg-[#0B111A] border border-slate-800 rounded-xl p-4 space-y-2 text-xs",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex flex-wrap items-center gap-x-4 gap-y-1 font-mono-tabular text-slate-200",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["AudioMode: ", probeData.audioMode] }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["Ringer: ", probeData.ringerMode] }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["Speakerphone: ", probeData.isSpeakerphoneOn ? "ON" : "OFF"] }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["BT SCO: ", probeData.isBluetoothScoOn ? "ON" : "OFF"] })
+							]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "text-slate-400",
+							children: probeData.audioMode === "MODE_IN_COMMUNICATION" ? "Active VoIP communication session detected (WhatsApp/VoIP call). Android typically maps hardware volume keys to STREAM_VOICE_CALL in this mode." : probeData.native ? "No active VoIP session detected (MODE_NORMAL). Start a WhatsApp voice call and tap Probe Live Audio Mode again to confirm." : "Web preview mode: live AudioManager.getMode() inspection requires the installed Android APK."
+						})]
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-3",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "flex items-start justify-between gap-3",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "flex items-start gap-2.5",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Power, { className: "w-5 h-5 text-cyan-400 shrink-0 mt-0.5" }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+							className: "text-base font-semibold text-slate-100",
+							children: "Reboot & App-Update Persistence Test"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+							className: "text-xs text-slate-400 mt-0.5",
+							children: "Native BootCompletedReceiver restores all AlarmManager schedules after restart"
+						})] })]
+					})
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "bg-[#0B111A] border border-slate-800 rounded-xl p-3.5",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "text-slate-400",
+								children: "Receiver Component"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "font-semibold text-slate-100 mt-1 flex items-center gap-1.5",
+								children: isNative && permissions.bootReceiverRegistered ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleCheck, { className: "w-3.5 h-3.5 text-emerald-400 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Registered" })] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(TriangleAlert, { className: "w-3.5 h-3.5 text-amber-400 shrink-0" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: isNative ? "Disabled" : "APK Required" })] })
+							})]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "bg-[#0B111A] border border-slate-800 rounded-xl p-3.5",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "text-slate-400",
+								children: "Last Boot Restore"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "font-mono-tabular font-semibold text-slate-100 mt-1",
+								children: formatTimestamp(bootRestore.lastBootRestoreAt)
+							})]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "bg-[#0B111A] border border-slate-800 rounded-xl p-3.5",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "text-slate-400",
+								children: "Restored Rules"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "font-mono-tabular font-semibold text-slate-100 mt-1",
+								children: bootRestore.lastBootRestoreAt > 0 ? `${bootRestore.lastBootRestoredCount} (${bootRestore.lastBootRestoreReason})` : "Awaiting first reboot"
+							})]
+						})
+					]
+				})]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+				className: "bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-3",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "flex items-center justify-between gap-3",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+						className: "text-base font-semibold text-slate-100",
+						children: "Native Execution History"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "text-xs text-slate-400 mt-0.5",
+						children: "Real outcomes recorded by Android VolumeSchedulerStorage"
+					})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						type: "button",
+						onClick: () => void onRefreshLogs(),
+						className: "min-h-[40px] px-3 py-1.5 rounded-lg bg-[#0B111A] border border-slate-800 text-xs text-slate-300 hover:text-cyan-300",
+						children: "Refresh"
+					})]
+				}), logs.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "text-xs text-slate-400 py-4 text-center",
+					children: isNative ? "No native executions recorded yet. Run a stream test or schedule a 10s test alarm above." : "Execution logs populate from native SharedPreferences when running inside the Android APK."
+				}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+					className: "divide-y divide-slate-800/80",
+					children: logs.slice(0, 15).map((entry) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "py-3 flex items-start justify-between gap-3 text-xs",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "min-w-0 space-y-0.5",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-center gap-2 font-medium text-slate-200",
+								children: [
+									entry.success ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleCheck, { className: "w-3.5 h-3.5 text-emerald-400 shrink-0" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CircleX, { className: "w-3.5 h-3.5 text-rose-400 shrink-0" }),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: entry.source }),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+										className: "text-slate-600",
+										"aria-hidden": "true",
+										children: "·"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+										className: "text-cyan-300",
+										children: getStreamLabel(entry.stream)
+									}),
+									entry.maxIndex > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+										className: "text-slate-600",
+										"aria-hidden": "true",
+										children: "·"
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+										className: "font-mono-tabular text-slate-300",
+										children: [
+											entry.actualIndex,
+											"/",
+											entry.maxIndex,
+											" (",
+											entry.actualPercentage,
+											"%)"
+										]
+									})] })
+								]
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+								className: "text-slate-400 leading-relaxed",
+								children: entry.message
+							})]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+							className: "font-mono-tabular text-slate-500 shrink-0 text-right",
+							children: formatTimestamp(entry.timestamp)
+						})]
+					}, entry.id))
+				})]
+			})
+		]
+	});
 };
 // src/App.tsx
 function App() {
@@ -14760,7 +15048,8 @@ function App() {
 		setSettings((prev) => prev ? {
 			...prev,
 			recentLogs: data.logs,
-			bootRestore: data.bootRestore
+			bootRestore: data.bootRestore,
+			lastTestAlarmResult: data.lastTestAlarmResult
 		} : prev);
 	};
 	const navItems = [
@@ -14883,7 +15172,8 @@ function App() {
 							permissions,
 							bootRestore: settings.bootRestore,
 							logs: settings.recentLogs,
-							onTestStream: (stream, pct, playTone) => volumeScheduler.testVolumeStream(stream, pct, playTone).then(async (r) => {
+							lastTestAlarmResult: settings.lastTestAlarmResult,
+							onTestStream: (stream, pct) => volumeScheduler.testVolumeStream(stream, pct).then(async (r) => {
 								await loadAll();
 								return r;
 							}),

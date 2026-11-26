@@ -19,10 +19,10 @@ import type {
 } from '../types/volume';
 import {
   STREAM_OPTIONS,
+  formatRuleStreamsSummary,
   formatTime12h,
   formatTimestamp,
   formatTriggerRelative,
-  getStreamLabel,
   inferActiveProfileName,
 } from '../utils/formatters';
 
@@ -84,7 +84,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-medium text-slate-400">
-                Active Volume Profile
+                Last Active Schedule Profile
               </p>
               <h2 className="text-xl font-semibold text-slate-100 mt-1 leading-snug">
                 {activeProfile}
@@ -148,7 +148,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         {/* Next Scheduled Change Card */}
         <div className="lg:col-span-5 bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 flex flex-col justify-between gap-4">
           <div className="flex items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-medium text-slate-400">
                 Next Scheduled Change
               </p>
@@ -158,15 +158,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                     <span className="text-2xl font-bold font-mono-tabular text-slate-100">
                       {formatTime12h(settings.nextScheduledChange.time)}
                     </span>
-                    <span className="text-sm font-semibold font-mono-tabular text-cyan-300">
-                      {settings.nextScheduledChange.percentage}%
-                    </span>
+                    {settings.nextScheduledChange.label && (
+                      <span className="text-sm font-medium text-cyan-300 truncate">
+                        {settings.nextScheduledChange.label}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-sm text-slate-300 mt-1">
-                    {getStreamLabel(settings.nextScheduledChange.stream)}
-                    {settings.nextScheduledChange.label
-                      ? ` · ${settings.nextScheduledChange.label}`
-                      : ''}
+                  <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                    {formatRuleStreamsSummary(settings.nextScheduledChange.streams)}
                   </p>
                 </>
               ) : (
@@ -224,14 +223,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         </div>
       )}
 
-      {/* Primary Required System Stream Readouts */}
+      {/* Live System Audio Stream Readouts */}
       <section>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-slate-200">
-            Current System Volume Levels
+            Live Android System Volume Levels
           </h3>
           <span className="text-xs text-slate-400">
-            Hardware step accuracy
+            Read directly from AudioManager
           </span>
         </div>
 
@@ -282,7 +281,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           ))}
         </div>
 
-        {/* Secondary Streams (Alarm & Media) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-3.5">
           {[alarm, media].map((snap) => (
             <div
@@ -315,7 +313,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
       {/* Quick Controls & Apply Volume Now */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Quick Mode Buttons */}
         <div className="lg:col-span-5 bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4">
           <div>
             <h3 className="text-sm font-semibold text-slate-100">Quick Controls</h3>
@@ -337,7 +334,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               </div>
               <div>
                 <div className="text-sm font-semibold text-slate-100">Day Mode</div>
-                <div className="text-xs text-slate-400">Ring & Notif 100%</div>
+                <div className="text-xs text-slate-400">Ring &amp; Notif 100%</div>
               </div>
             </button>
 
@@ -353,13 +350,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               </div>
               <div>
                 <div className="text-sm font-semibold text-slate-100">Night Mode</div>
-                <div className="text-xs text-slate-400">Ring & Notif 50%</div>
+                <div className="text-xs text-slate-400">Ring &amp; Notif 50%</div>
               </div>
             </button>
           </div>
         </div>
 
-        {/* Apply Volume Now */}
         <div className="lg:col-span-7 bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -406,7 +402,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <p className="text-xs text-slate-400">
-              Android maps percentages to discrete hardware steps ({settings.streams[selectedStream]?.minIndex ?? 0}–{settings.streams[selectedStream]?.maxIndex ?? 15}).
+              Discrete hardware steps on this stream: {settings.streams[selectedStream]?.minIndex ?? 0}–{settings.streams[selectedStream]?.maxIndex ?? 15}.
             </p>
             <button
               type="button"

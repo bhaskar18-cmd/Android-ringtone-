@@ -1,4 +1,4 @@
-import type { AudioStreamKey, VolumeSchedule } from '../types/volume';
+import type { AudioStreamKey, RuleStreamsMap, VolumeSchedule } from '../types/volume';
 
 export const STREAM_OPTIONS: Array<{
   key: AudioStreamKey;
@@ -6,6 +6,12 @@ export const STREAM_OPTIONS: Array<{
   shortLabel: string;
   description: string;
 }> = [
+  {
+    key: 'media',
+    label: 'Media',
+    shortLabel: 'Media',
+    description: 'Music, video, and in-app media playback',
+  },
   {
     key: 'ringtone',
     label: 'Ringtone',
@@ -25,12 +31,6 @@ export const STREAM_OPTIONS: Array<{
     description: 'Clock alarms and timer alerts',
   },
   {
-    key: 'media',
-    label: 'Media',
-    shortLabel: 'Media',
-    description: 'Music, video, and in-app audio',
-  },
-  {
     key: 'voice_call',
     label: 'Voice Call',
     shortLabel: 'Call',
@@ -42,6 +42,17 @@ export const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] 
 
 export function getStreamLabel(stream: string): string {
   return STREAM_OPTIONS.find((s) => s.key === stream)?.label ?? stream;
+}
+
+export function getStreamShortLabel(stream: string): string {
+  return STREAM_OPTIONS.find((s) => s.key === stream)?.shortLabel ?? stream;
+}
+
+export function formatRuleStreamsSummary(streams: RuleStreamsMap): string {
+  const parts = STREAM_OPTIONS.filter((opt) => streams[opt.key]?.enabled).map(
+    (opt) => `${opt.shortLabel} ${streams[opt.key].percentage}%`
+  );
+  return parts.length > 0 ? parts.join(' · ') : 'No streams enabled';
 }
 
 export function formatTime12h(time24: string): string {
@@ -103,7 +114,6 @@ export function inferActiveProfileName(schedules: VolumeSchedule[], schedulerEna
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const today = now.getDay();
 
-  // Check schedules active today whose time has already passed, else yesterday's latest
   const todayMatches = enabled
     .filter((s) => s.days.includes(today))
     .map((s) => {
@@ -115,7 +125,7 @@ export function inferActiveProfileName(schedules: VolumeSchedule[], schedulerEna
 
   if (todayMatches.length > 0) {
     const s = todayMatches[0].schedule;
-    const title = s.label || `${getStreamLabel(s.stream)} ${s.percentage}%`;
+    const title = s.label || formatRuleStreamsSummary(s.streams);
     return `${title} · ${formatTime12h(s.time)}`;
   }
 
@@ -130,7 +140,7 @@ export function inferActiveProfileName(schedules: VolumeSchedule[], schedulerEna
 
   if (yesterdayMatches.length > 0) {
     const s = yesterdayMatches[0].schedule;
-    const title = s.label || `${getStreamLabel(s.stream)} ${s.percentage}%`;
+    const title = s.label || formatRuleStreamsSummary(s.streams);
     return `${title} · ${formatTime12h(s.time)} (Overnight)`;
   }
 

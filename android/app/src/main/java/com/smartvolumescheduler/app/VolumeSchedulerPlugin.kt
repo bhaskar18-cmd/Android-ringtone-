@@ -21,7 +21,6 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -103,22 +102,14 @@ class VolumeSchedulerPlugin : Plugin() {
             )
         )
 
-        val response = JSObject.fromJSONObject(result.toJson())
-        call.resolve(response)
+        call.resolve(JSObject.fromJSONObject(result.toJson()))
     }
 
     @PluginMethod
     fun scheduleVolumeChange(call: PluginCall) {
         val time = call.getString("time")
-        val stream = call.getString("stream")
-        val percentage = call.getInt("percentage")
-        if (time.isNullOrBlank() || stream.isNullOrBlank() || percentage == null) {
-            call.reject("Missing required parameters: time, stream, percentage.")
-            return
-        }
-
-        if (AudioStreamType.fromKey(stream) == null) {
-            call.reject("Unsupported audio stream: $stream")
+        if (time.isNullOrBlank()) {
+            call.reject("Missing required parameter: time.")
             return
         }
 
@@ -126,6 +117,44 @@ class VolumeSchedulerPlugin : Plugin() {
         val existing = VolumeSchedulerStorage.getScheduleById(context, id)
         val label = call.getString("label") ?: existing?.label ?: ""
         val enabled = call.getBoolean("enabled") ?: existing?.enabled ?: true
+
+        val parsedStreams = linkedMapOf<String, StreamRuleConfig>()
+        val streamsObj = call.getObject("streams")
+        if (streamsObj != null) {
+            AudioStreamType.entries.forEach { st ->
+                val cfgObj = streamsObj.optJSONObject(st.key)
+                parsedStreams[st.key] = StreamRuleConfig.fromJson(
+                    cfgObj,
+                    defaultEnabled = false,
+                    defaultPct = 70
+                )
+            }
+        } else {
+            // Backward-compatible single-stream parameters
+            val singleStream = call.getString("stream")
+            val singlePct = call.getInt("percentage")
+            if (singleStream.isNullOrBlank() || singlePct == null) {
+                call.reject("Missing required streams configuration.")
+                return
+            }
+            if (AudioStreamType.fromKey(singleStream) == null) {
+                call.reject("Unsupported audio stream: $singleStream")
+                return
+            }
+            AudioStreamType.entries.forEach { st ->
+                parsedStreams[st.key] = if (st.key.equals(singleStream, ignoreCase = true)) {
+                    StreamRuleConfig(true, singlePct.coerceIn(0, 100))
+                } else {
+                    StreamRuleConfig(false, 70)
+                }
+            }
+        }
+
+        if (parsedStreams.values.none { it.enabled }) {
+            call.reject("Enable at least one audio stream in the rule.")
+            return
+        }
+
         val daysArr = call.getArray("days")
         val days = mutableListOf<Int>()
         if (daysArr != null) {
@@ -144,8 +173,7 @@ class VolumeSchedulerPlugin : Plugin() {
             id = id,
             label = label.trim(),
             time = time.trim(),
-            stream = stream.trim(),
-            percentage = percentage.coerceIn(0, 100),
+            streams = parsedStreams,
             days = days.sorted(),
             enabled = enabled,
             lastExecutedAt = existing?.lastExecutedAt ?: 0L,
@@ -352,7 +380,6 @@ class VolumeSchedulerPlugin : Plugin() {
             }
 
             else -> {
-                // Auto: only request/open the highest-priority missing permission
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !VolumeAlarmManager.canScheduleExactAlarms(context)) {
                     val opened = openSystemSettings(
                         Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
@@ -428,63 +455,31 @@ class VolumeSchedulerPlugin : Plugin() {
         }
 
         val percentage = call.getInt("percentage")
-        val playTone = call.getBoolean("playTone", true) ?: true
+        val testResult = VolumeController.runStreamTest(
+            context = context,
+            stream = stream,
+            requestedPercentage = percentage,
+            source = "FOREGROUND_TEST"
+        )
 
-        val applyResult = if (percentage != null) {
-            VolumeController.applyVolume(context, stream.key, percentage, showSystemUi = false)
-        } else {
-            val snap = VolumeController.getStreamSnapshot(context, stream)
-            val curr = snap.optInt("currentIndex", 0)
-            val min = snap.optInt("minIndex", 0)
-            val max = snap.optInt("maxIndex", 1)
-            val pct = snap.optInt("percentage", 0)
-            VolumeApplyResult(
-                success = true,
-                appliedExactTarget = true,
-                stream = stream.key,
-                requestedPercentage = pct,
-                targetIndex = curr,
-                actualIndex = curr,
-                actualPercentage = pct,
-                minIndex = min,
-                maxIndex = max,
-                dndBlocked = false,
-                fixedVolume = false,
-                message = "Read current ${stream.label} volume: $curr/$max ($pct%)."
-            )
-        }
-
-        val (tonePlayed, toneMsg) = if (playTone && applyResult.success) {
-            VolumeController.playBriefProbeTone(context, stream)
-        } else {
-            false to "Tone probe skipped."
-        }
-
-        val am = VolumeController.getAudioManager(context)
         VolumeSchedulerStorage.appendLog(
             context,
             ExecutionLogEntry(
                 id = UUID.randomUUID().toString(),
-                timestamp = System.currentTimeMillis(),
-                source = "STREAM_TEST",
+                timestamp = testResult.timestamp,
+                source = "FOREGROUND_TEST",
                 scheduleId = "",
-                stream = applyResult.stream,
-                requestedPercentage = applyResult.requestedPercentage,
-                actualIndex = applyResult.actualIndex,
-                maxIndex = applyResult.maxIndex,
-                actualPercentage = applyResult.actualPercentage,
-                success = applyResult.success,
-                message = "${applyResult.message} $toneMsg"
+                stream = testResult.stream,
+                requestedPercentage = testResult.requestedPercentage,
+                actualIndex = testResult.actualIndex,
+                maxIndex = testResult.maxIndex,
+                actualPercentage = testResult.actualPercentage,
+                success = testResult.volumeApplied,
+                message = testResult.message
             )
         )
 
-        call.resolve(JSObject().apply {
-            put("applyResult", JSObject.fromJSONObject(applyResult.toJson()))
-            put("tonePlayed", tonePlayed)
-            put("toneMessage", toneMsg)
-            put("audioMode", VolumeController.getAudioModeString(am))
-            put("ringerMode", VolumeController.getRingerModeString(am))
-        })
+        call.resolve(JSObject.fromJSONObject(testResult.toJson()))
     }
 
     @PluginMethod
@@ -513,9 +508,15 @@ class VolumeSchedulerPlugin : Plugin() {
         val logs = VolumeSchedulerStorage.getLogs(context)
         val arr = JSArray()
         logs.forEach { arr.put(it.toJson()) }
+        val lastTest = VolumeSchedulerStorage.getLastTestAlarmResult(context)
         call.resolve(JSObject().apply {
             put("logs", arr)
             put("bootRestore", JSObject.fromJSONObject(VolumeSchedulerStorage.getBootRestoreInfo(context)))
+            if (lastTest != null) {
+                put("lastTestAlarmResult", JSObject.fromJSONObject(lastTest.toJson()))
+            } else {
+                put("lastTestAlarmResult", JSONObject.NULL)
+            }
         })
     }
 
@@ -571,6 +572,8 @@ class VolumeSchedulerPlugin : Plugin() {
         val logsArr = JSArray()
         VolumeSchedulerStorage.getLogs(context).forEach { logsArr.put(it.toJson()) }
 
+        val lastTest = VolumeSchedulerStorage.getLastTestAlarmResult(context)
+
         return JSObject().apply {
             put("native", true)
             put("streams", streams)
@@ -587,6 +590,11 @@ class VolumeSchedulerPlugin : Plugin() {
             }
             put("bootRestore", JSObject.fromJSONObject(VolumeSchedulerStorage.getBootRestoreInfo(context)))
             put("recentLogs", logsArr)
+            if (lastTest != null) {
+                put("lastTestAlarmResult", JSObject.fromJSONObject(lastTest.toJson()))
+            } else {
+                put("lastTestAlarmResult", JSONObject.NULL)
+            }
             put("deviceInfo", JSObject().apply {
                 put("manufacturer", Build.MANUFACTURER)
                 put("model", Build.MODEL)
@@ -662,9 +670,9 @@ class VolumeSchedulerPlugin : Plugin() {
                 put(
                     "detail",
                     if (notifGranted) {
-                        "Allowed for silent test-alarm diagnostic confirmations."
+                        "Optional permission granted."
                     } else {
-                        "Optional: only used for silent confirmation when running test alarms."
+                        "Optional permission not granted (not required for volume scheduling or testing)."
                     }
                 )
             })

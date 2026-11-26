@@ -8,11 +8,12 @@ import type {
   PermissionActionType,
   PermissionStatusResponse,
   RequestPermissionResponse,
+  RuleStreamsMap,
   ScheduleVolumeChangeParams,
   ScheduleVolumeChangeResponse,
   SchedulerToggleResponse,
   StreamSnapshot,
-  StreamTestResponse,
+  StreamTestResult,
   TestAlarmResponse,
   VolumeApplyResult,
   VolumeSchedule,
@@ -24,7 +25,7 @@ const NativeVolumeScheduler = registerPlugin<VolumeSchedulerPluginInterface>(
   'VolumeSchedulerPlugin'
 );
 
-const WEB_STORAGE_KEY = 'smart_volume_scheduler_web_preview_v1';
+const WEB_STORAGE_KEY = 'smart_volume_scheduler_web_preview_v2';
 
 interface WebPreviewState {
   schedulerEnabled: boolean;
@@ -33,6 +34,53 @@ interface WebPreviewState {
 
 export function isNativeAndroid(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+}
+
+export function createDefaultStreamsMap(
+  overrides: Partial<RuleStreamsMap> = {}
+): RuleStreamsMap {
+  return {
+    media: overrides.media ?? { enabled: false, percentage: 70 },
+    ringtone: overrides.ringtone ?? { enabled: false, percentage: 70 },
+    notification: overrides.notification ?? { enabled: false, percentage: 70 },
+    alarm: overrides.alarm ?? { enabled: false, percentage: 70 },
+    voice_call: overrides.voice_call ?? { enabled: false, percentage: 70 },
+  };
+}
+
+function normalizeSchedule(raw: Partial<VolumeSchedule> & { stream?: AudioStreamKey; percentage?: number }): VolumeSchedule {
+  const streams: RuleStreamsMap = createDefaultStreamsMap();
+  if (raw.streams) {
+    (['media', 'ringtone', 'notification', 'alarm', 'voice_call'] as AudioStreamKey[]).forEach(
+      (k) => {
+        const entry = raw.streams?.[k];
+        if (entry) {
+          streams[k] = {
+            enabled: Boolean(entry.enabled),
+            percentage: Math.min(100, Math.max(0, Math.round(entry.percentage ?? 70))),
+          };
+        }
+      }
+    );
+  } else if (raw.stream) {
+    streams[raw.stream] = {
+      enabled: true,
+      percentage: Math.min(100, Math.max(0, Math.round(raw.percentage ?? 80))),
+    };
+  }
+
+  return {
+    id: raw.id || `sched-${Date.now()}`,
+    label: raw.label ?? '',
+    time: raw.time ?? '08:00',
+    streams,
+    days: Array.isArray(raw.days) && raw.days.length > 0 ? [...raw.days].sort() : [0, 1, 2, 3, 4, 5, 6],
+    enabled: raw.enabled ?? true,
+    nextTriggerAt: raw.nextTriggerAt ?? 0,
+    lastExecutedAt: raw.lastExecutedAt ?? 0,
+    lastExecutionSuccess: raw.lastExecutionSuccess ?? true,
+    lastExecutionMessage: raw.lastExecutionMessage ?? '',
+  };
 }
 
 function computeNextLocalTrigger(time: string, days: number[]): number {
@@ -61,8 +109,10 @@ function loadWebPreviewState(): WebPreviewState {
         id: 'default-day-0800',
         label: 'Day Mode',
         time: '08:00',
-        stream: 'ringtone',
-        percentage: 100,
+        streams: createDefaultStreamsMap({
+          ringtone: { enabled: true, percentage: 100 },
+          notification: { enabled: true, percentage: 100 },
+        }),
         days: [0, 1, 2, 3, 4, 5, 6],
         enabled: true,
         nextTriggerAt: computeNextLocalTrigger('08:00', [0, 1, 2, 3, 4, 5, 6]),
@@ -74,8 +124,10 @@ function loadWebPreviewState(): WebPreviewState {
         id: 'default-night-2000',
         label: 'Night Mode',
         time: '20:00',
-        stream: 'ringtone',
-        percentage: 50,
+        streams: createDefaultStreamsMap({
+          ringtone: { enabled: true, percentage: 50 },
+          notification: { enabled: true, percentage: 50 },
+        }),
         days: [0, 1, 2, 3, 4, 5, 6],
         enabled: true,
         nextTriggerAt: computeNextLocalTrigger('20:00', [0, 1, 2, 3, 4, 5, 6]),
@@ -93,13 +145,16 @@ function loadWebPreviewState(): WebPreviewState {
       return defaultState;
     }
     const parsed = JSON.parse(raw) as WebPreviewState;
-    const schedules = (parsed.schedules || []).map((s) => ({
-      ...s,
-      nextTriggerAt:
-        parsed.schedulerEnabled && s.enabled
-          ? computeNextLocalTrigger(s.time, s.days)
-          : 0,
-    }));
+    const schedules = (parsed.schedules || []).map((item) => {
+      const normalized = normalizeSchedule(item);
+      return {
+        ...normalized,
+        nextTriggerAt:
+          parsed.schedulerEnabled && normalized.enabled
+            ? computeNextLocalTrigger(normalized.time, normalized.days)
+            : 0,
+      };
+    });
     return {
       schedulerEnabled: Boolean(parsed.schedulerEnabled),
       schedules: schedules.sort((a, b) => a.time.localeCompare(b.time)),
@@ -119,10 +174,10 @@ function saveWebPreviewState(state: WebPreviewState): void {
 
 function getPreviewUnobservedStreams(): Record<AudioStreamKey, StreamSnapshot> {
   return {
+    media: { stream: 'media', label: 'Media', currentIndex: 0, minIndex: 0, maxIndex: 15, percentage: 0 },
     ringtone: { stream: 'ringtone', label: 'Ringtone', currentIndex: 0, minIndex: 0, maxIndex: 15, percentage: 0 },
     notification: { stream: 'notification', label: 'Notification', currentIndex: 0, minIndex: 0, maxIndex: 15, percentage: 0 },
     alarm: { stream: 'alarm', label: 'Alarm', currentIndex: 0, minIndex: 0, maxIndex: 15, percentage: 0 },
-    media: { stream: 'media', label: 'Media', currentIndex: 0, minIndex: 0, maxIndex: 15, percentage: 0 },
     voice_call: { stream: 'voice_call', label: 'Voice Call', currentIndex: 1, minIndex: 1, maxIndex: 5, percentage: 20 },
   };
 }
@@ -151,6 +206,7 @@ function buildWebSettings(): VolumeSettingsResponse {
       lastBootRestoredCount: 0,
     },
     recentLogs: [],
+    lastTestAlarmResult: null,
     deviceInfo: null,
   };
 }
@@ -177,7 +233,7 @@ function buildWebPermissionStatus(): PermissionStatusResponse {
     postNotifications: {
       granted: false,
       required: false,
-      detail: 'Unavailable in web browser. Optional runtime permission on Android 13+.',
+      detail: 'Optional permission (not required for volume scheduling or testing).',
     },
     bootReceiverRegistered: false,
   };
@@ -187,7 +243,14 @@ export const volumeScheduler = {
   async getVolumeSettings(): Promise<VolumeSettingsResponse> {
     if (isNativeAndroid()) {
       const res = await NativeVolumeScheduler.getVolumeSettings();
-      return { ...res, native: true };
+      return {
+        ...res,
+        native: true,
+        schedules: (res.schedules || []).map((s) => normalizeSchedule(s)),
+        nextScheduledChange: res.nextScheduledChange
+          ? normalizeSchedule(res.nextScheduledChange)
+          : null,
+      };
     }
     return buildWebSettings();
   },
@@ -213,7 +276,7 @@ export const volumeScheduler = {
       dndBlocked: false,
       fixedVolume: false,
       message:
-        'Browser preview cannot modify Android AudioManager streams. Build and install the Android APK to apply real system volume changes.',
+        'Browser preview cannot modify Android AudioManager streams. Install the Android APK to apply real system volume changes.',
     };
   },
 
@@ -221,7 +284,11 @@ export const volumeScheduler = {
     params: ScheduleVolumeChangeParams
   ): Promise<ScheduleVolumeChangeResponse> {
     if (isNativeAndroid()) {
-      return NativeVolumeScheduler.scheduleVolumeChange(params);
+      const res = await NativeVolumeScheduler.scheduleVolumeChange(params);
+      return {
+        ...res,
+        schedule: normalizeSchedule(res.schedule),
+      };
     }
 
     const state = loadWebPreviewState();
@@ -229,12 +296,11 @@ export const volumeScheduler = {
     const existing = state.schedules.find((s) => s.id === id);
     const enabled = params.enabled ?? existing?.enabled ?? true;
     const days = params.days.length > 0 ? [...params.days].sort() : [0, 1, 2, 3, 4, 5, 6];
-    const updatedSchedule: VolumeSchedule = {
+    const updatedSchedule: VolumeSchedule = normalizeSchedule({
       id,
       label: (params.label ?? existing?.label ?? '').trim(),
       time: params.time,
-      stream: params.stream,
-      percentage: Math.min(100, Math.max(0, Math.round(params.percentage))),
+      streams: params.streams,
       days,
       enabled,
       nextTriggerAt:
@@ -244,7 +310,7 @@ export const volumeScheduler = {
       lastExecutedAt: existing?.lastExecutedAt ?? 0,
       lastExecutionSuccess: existing?.lastExecutionSuccess ?? true,
       lastExecutionMessage: existing?.lastExecutionMessage ?? '',
-    };
+    });
 
     const nextList = state.schedules.some((s) => s.id === id)
       ? state.schedules.map((s) => (s.id === id ? updatedSchedule : s))
@@ -262,13 +328,20 @@ export const volumeScheduler = {
       exact: false,
       mode: 'web_preview',
       message:
-        'Saved in web preview storage. Native AlarmManager scheduling activates when running the Android APK.',
+        'Saved in web preview storage. Native AlarmManager scheduling activates inside the Android APK.',
     };
   },
 
   async getScheduledChanges(): Promise<GetScheduledChangesResponse> {
     if (isNativeAndroid()) {
-      return NativeVolumeScheduler.getScheduledChanges();
+      const res = await NativeVolumeScheduler.getScheduledChanges();
+      return {
+        ...res,
+        schedules: (res.schedules || []).map((s) => normalizeSchedule(s)),
+        nextScheduledChange: res.nextScheduledChange
+          ? normalizeSchedule(res.nextScheduledChange)
+          : null,
+      };
     }
     const settings = buildWebSettings();
     return {
@@ -280,7 +353,11 @@ export const volumeScheduler = {
 
   async deleteScheduledChange(id: string): Promise<DeleteScheduledChangeResponse> {
     if (isNativeAndroid()) {
-      return NativeVolumeScheduler.deleteScheduledChange({ id });
+      const res = await NativeVolumeScheduler.deleteScheduledChange({ id });
+      return {
+        ...res,
+        schedules: (res.schedules || []).map((s) => normalizeSchedule(s)),
+      };
     }
     const state = loadWebPreviewState();
     const remaining = state.schedules.filter((s) => s.id !== id);
@@ -297,7 +374,11 @@ export const volumeScheduler = {
     enabled: boolean
   ): Promise<{ success: boolean; schedule: VolumeSchedule; mode: string; message: string }> {
     if (isNativeAndroid()) {
-      return NativeVolumeScheduler.toggleScheduleEnabled({ id, enabled });
+      const res = await NativeVolumeScheduler.toggleScheduleEnabled({ id, enabled });
+      return {
+        ...res,
+        schedule: normalizeSchedule(res.schedule),
+      };
     }
     const state = loadWebPreviewState();
     let updated: VolumeSchedule | null = null;
@@ -391,36 +472,34 @@ export const volumeScheduler = {
 
   async testVolumeStream(
     stream: AudioStreamKey,
-    percentage?: number,
-    playTone = true
-  ): Promise<StreamTestResponse> {
+    percentage?: number
+  ): Promise<StreamTestResult> {
     if (isNativeAndroid()) {
       return NativeVolumeScheduler.testVolumeStream({
         stream,
         percentage,
-        playTone,
       });
     }
     return {
-      applyResult: {
-        success: false,
-        appliedExactTarget: false,
-        stream,
-        requestedPercentage: percentage ?? 0,
-        targetIndex: 0,
-        actualIndex: 0,
-        actualPercentage: 0,
-        minIndex: 0,
-        maxIndex: 15,
-        dndBlocked: false,
-        fixedVolume: false,
-        message:
-          'Native AudioManager stream test failed: running in web browser, not Android Capacitor runtime.',
-      },
-      tonePlayed: false,
-      toneMessage: 'Audio probe requires native Android AudioManager.',
+      stream,
+      requestedPercentage: percentage ?? 0,
+      targetIndex: 0,
+      actualIndex: 0,
+      minIndex: 0,
+      maxIndex: 15,
+      actualPercentage: 0,
+      volumeApplied: false,
+      playbackStarted: false,
+      streamVerified: false,
+      callSessionActive: false,
       audioMode: 'WEB_PREVIEW',
       ringerMode: 'normal',
+      dndBlocked: false,
+      fixedVolume: false,
+      source: 'FOREGROUND_TEST',
+      timestamp: Date.now(),
+      message:
+        'Native AudioManager stream test failed: running in web browser, not Android Capacitor runtime.',
     };
   },
 
@@ -449,6 +528,7 @@ export const volumeScheduler = {
   async getExecutionLogs(): Promise<{
     logs: ExecutionLogEntry[];
     bootRestore: VolumeSettingsResponse['bootRestore'];
+    lastTestAlarmResult: StreamTestResult | null;
   }> {
     if (isNativeAndroid()) {
       return NativeVolumeScheduler.getExecutionLogs();
@@ -460,6 +540,7 @@ export const volumeScheduler = {
         lastBootRestoreReason: '',
         lastBootRestoredCount: 0,
       },
+      lastTestAlarmResult: null,
     };
   },
 
@@ -487,7 +568,15 @@ export const volumeScheduler = {
     }
     const handle = await NativeVolumeScheduler.addListener(
       'volumeStateChanged',
-      (state) => callback({ ...state, native: true })
+      (state) =>
+        callback({
+          ...state,
+          native: true,
+          schedules: (state.schedules || []).map((s) => normalizeSchedule(s)),
+          nextScheduledChange: state.nextScheduledChange
+            ? normalizeSchedule(state.nextScheduledChange)
+            : null,
+        })
     );
     return () => {
       void handle.remove();

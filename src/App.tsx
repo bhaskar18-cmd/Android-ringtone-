@@ -193,6 +193,7 @@ export default function App() {
             ...prev,
             recentLogs: data.logs,
             bootRestore: data.bootRestore,
+            lastTestAlarmResult: data.lastTestAlarmResult,
           }
         : prev
     );
@@ -318,8 +319,9 @@ export default function App() {
                 permissions={permissions}
                 bootRestore={settings.bootRestore}
                 logs={settings.recentLogs}
-                onTestStream={(stream, pct, playTone) =>
-                  volumeScheduler.testVolumeStream(stream, pct, playTone).then(async (r) => {
+                lastTestAlarmResult={settings.lastTestAlarmResult}
+                onTestStream={(stream, pct) =>
+                  volumeScheduler.testVolumeStream(stream, pct).then(async (r) => {
                     await loadAll();
                     return r;
                   })

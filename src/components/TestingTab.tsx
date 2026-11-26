@@ -16,7 +16,7 @@ import type {
   BootRestoreInfo,
   ExecutionLogEntry,
   PermissionStatusResponse,
-  StreamTestResponse,
+  StreamTestResult,
   TestAlarmResponse,
 } from '../types/volume';
 import { formatTimestamp, getStreamLabel } from '../utils/formatters';
@@ -26,11 +26,11 @@ interface TestingTabProps {
   permissions: PermissionStatusResponse;
   bootRestore: BootRestoreInfo;
   logs: ExecutionLogEntry[];
+  lastTestAlarmResult: StreamTestResult | null;
   onTestStream: (
     stream: AudioStreamKey,
-    percentage: number,
-    playTone: boolean
-  ) => Promise<StreamTestResponse>;
+    percentage: number
+  ) => Promise<StreamTestResult>;
   onScheduleTestAlarm: (
     secondsFromNow: number,
     stream: AudioStreamKey,
@@ -40,11 +40,94 @@ interface TestingTabProps {
   onRefreshLogs: () => Promise<void>;
 }
 
+const TestResultCard: React.FC<{ title: string; result: StreamTestResult }> = ({
+  title,
+  result,
+}) => {
+  const isVoiceCall = result.stream === 'voice_call';
+  const badgeColor = !result.volumeApplied
+    ? 'bg-rose-500/10 border-rose-500/30 text-rose-100'
+    : result.streamVerified
+      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100'
+      : 'bg-amber-500/10 border-amber-500/35 text-amber-100';
+
+  return (
+    <div className={`rounded-xl border p-4 text-xs space-y-2.5 ${badgeColor}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-semibold text-sm">
+          {!result.volumeApplied ? (
+            <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+          ) : result.streamVerified ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+          )}
+          <span>
+            {title}: {getStreamLabel(result.stream)}
+          </span>
+        </div>
+        <span className="font-mono-tabular opacity-75">
+          {formatTimestamp(result.timestamp)}
+        </span>
+      </div>
+
+      <p className="leading-relaxed opacity-95">{result.message}</p>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1.5 border-t border-white/10 font-mono-tabular">
+        <div>
+          <span className="opacity-70 block">Requested</span>
+          <span className="font-semibold">{result.requestedPercentage}%</span>
+        </div>
+        <div>
+          <span className="opacity-70 block">Actual Index</span>
+          <span className="font-semibold">
+            {result.actualIndex} / {result.maxIndex}
+          </span>
+        </div>
+        <div>
+          <span className="opacity-70 block">Actual Achievable</span>
+          <span className="font-semibold">{result.actualPercentage}%</span>
+        </div>
+        <div>
+          <span className="opacity-70 block">Volume Applied</span>
+          <span className="font-semibold">{result.volumeApplied ? 'Yes' : 'No'}</span>
+        </div>
+        <div>
+          <span className="opacity-70 block">Playback Started</span>
+          <span className="font-semibold">
+            {isVoiceCall
+              ? 'N/A (No substitute)'
+              : result.playbackStarted
+                ? 'Yes'
+                : 'No'}
+          </span>
+        </div>
+        <div>
+          <span className="opacity-70 block">Stream Verified</span>
+          <span className="font-semibold">
+            {result.streamVerified ? 'Verified' : 'Unverified'}
+          </span>
+        </div>
+      </div>
+
+      {isVoiceCall && (
+        <p className="text-[11px] opacity-85">
+          Audio Mode: <span className="font-mono-tabular">{result.audioMode}</span> ·{' '}
+          {result.callSessionActive
+            ? 'Active call/communication session detected.'
+            : 'No call session active — verify actual call loudness during a live phone or VoIP call.'}
+        </p>
+      )}
+    </div>
+  );
+};
+
 export const TestingTab: React.FC<TestingTabProps> = ({
   isNative,
   permissions,
   bootRestore,
   logs,
+  lastTestAlarmResult,
   onTestStream,
   onScheduleTestAlarm,
   onProbeAudioMode,
@@ -52,12 +135,12 @@ export const TestingTab: React.FC<TestingTabProps> = ({
 }) => {
   const [testPct, setTestPct] = useState<number>(65);
   const [testingStream, setTestingStream] = useState<AudioStreamKey | null>(null);
-  const [streamResult, setStreamResult] = useState<StreamTestResponse | null>(null);
+  const [streamResult, setStreamResult] = useState<StreamTestResult | null>(null);
 
-  const [alarmStream, setAlarmStream] = useState<AudioStreamKey>('ringtone');
-  const [alarmPct, setAlarmPct] = useState<number>(70);
+  const [alarmStream, setAlarmStream] = useState<AudioStreamKey>('media');
+  const [alarmPct, setAlarmPct] = useState<number>(60);
   const [alarmDelay, setAlarmDelay] = useState<number>(10);
-  const [alarmResult, setAlarmResult] = useState<TestAlarmResponse | null>(null);
+  const [alarmDispatch, setAlarmDispatch] = useState<TestAlarmResponse | null>(null);
   const [schedulingAlarm, setSchedulingAlarm] = useState(false);
 
   const [probeData, setProbeData] = useState<AudioModeProbeResponse | null>(null);
@@ -66,7 +149,7 @@ export const TestingTab: React.FC<TestingTabProps> = ({
   const handleRunStreamTest = async (stream: AudioStreamKey) => {
     setTestingStream(stream);
     try {
-      const res = await onTestStream(stream, testPct, true);
+      const res = await onTestStream(stream, testPct);
       setStreamResult(res);
     } finally {
       setTestingStream(null);
@@ -77,7 +160,7 @@ export const TestingTab: React.FC<TestingTabProps> = ({
     setSchedulingAlarm(true);
     try {
       const res = await onScheduleTestAlarm(alarmDelay, alarmStream, alarmPct);
-      setAlarmResult(res);
+      setAlarmDispatch(res);
     } finally {
       setSchedulingAlarm(false);
     }
@@ -94,10 +177,11 @@ export const TestingTab: React.FC<TestingTabProps> = ({
   };
 
   const streamButtons: Array<{ key: AudioStreamKey; label: string; note: string }> = [
-    { key: 'ringtone', label: 'Test Ringtone Volume', note: 'AudioManager.STREAM_RING' },
-    { key: 'notification', label: 'Test Notification Volume', note: 'AudioManager.STREAM_NOTIFICATION' },
-    { key: 'alarm', label: 'Test Alarm Volume', note: 'AudioManager.STREAM_ALARM' },
-    { key: 'voice_call', label: 'Test Call Volume', note: 'AudioManager.STREAM_VOICE_CALL (min step >= 1)' },
+    { key: 'media', label: 'Test Media Volume', note: 'STREAM_MUSIC · Bundled WAV file' },
+    { key: 'ringtone', label: 'Test Ringtone Volume', note: 'STREAM_RING · Device ringtone audio' },
+    { key: 'notification', label: 'Test Notification Volume', note: 'STREAM_NOTIFICATION · Alert sound' },
+    { key: 'alarm', label: 'Test Alarm Volume', note: 'STREAM_ALARM · Alarm tone' },
+    { key: 'voice_call', label: 'Test Call Volume', note: 'STREAM_VOICE_CALL · Index + session check' },
   ];
 
   return (
@@ -110,7 +194,7 @@ export const TestingTab: React.FC<TestingTabProps> = ({
               Hardware Audio Stream Verification
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Applies the selected percentage through Android AudioManager, plays a brief probe tone, and reads back the actual hardware index.
+              Applies the percentage via AudioManager, runs real stream-specific playback (or call-session inspection for Voice Call), and reads back the actual hardware index.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -152,38 +236,11 @@ export const TestingTab: React.FC<TestingTabProps> = ({
         </div>
 
         {streamResult && (
-          <div
-            className={`rounded-xl border p-4 text-sm space-y-1.5 ${
-              streamResult.applyResult.success
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100'
-                : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
-            }`}
-          >
-            <div className="flex items-center gap-2 font-semibold">
-              {streamResult.applyResult.success ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              ) : (
-                <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
-              )}
-              <span>
-                {streamResult.applyResult.success
-                  ? `${getStreamLabel(streamResult.applyResult.stream)} Verified`
-                  : `${getStreamLabel(streamResult.applyResult.stream)} Failed`}
-              </span>
-            </div>
-            <p className="text-xs leading-relaxed opacity-95">
-              {streamResult.applyResult.message}
-            </p>
-            {streamResult.applyResult.success && (
-              <p className="text-xs font-mono-tabular text-slate-300">
-                Actual step: {streamResult.applyResult.actualIndex}/{streamResult.applyResult.maxIndex} ({streamResult.applyResult.actualPercentage}%) · {streamResult.toneMessage}
-              </p>
-            )}
-          </div>
+          <TestResultCard title="Foreground Test Result" result={streamResult} />
         )}
       </section>
 
-      {/* Section 2: Scheduled Execution Test */}
+      {/* Section 2: Scheduled Background Execution Test */}
       <section className="bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -191,7 +248,7 @@ export const TestingTab: React.FC<TestingTabProps> = ({
               Test Scheduled Background Execution
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Queues a real native AlarmManager broadcast. Lock your screen or swipe the app from recent apps after starting to verify autonomous execution.
+              Queues a native AlarmManager broadcast that executes the selected stream&apos;s real native test (no notification substitutes). Lock screen or close the app after starting, then reopen to inspect the recorded result.
             </p>
           </div>
           <Clock className="w-5 h-5 text-cyan-400 shrink-0" />
@@ -233,10 +290,10 @@ export const TestingTab: React.FC<TestingTabProps> = ({
               onChange={(e) => setAlarmStream(e.target.value as AudioStreamKey)}
               className="w-full min-h-[44px] px-3 rounded-xl bg-[#0B111A] border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-cyan-400"
             >
+              <option value="media">Media</option>
               <option value="ringtone">Ringtone</option>
               <option value="notification">Notification</option>
               <option value="alarm">Alarm</option>
-              <option value="media">Media</option>
               <option value="voice_call">Voice Call</option>
             </select>
           </div>
@@ -270,36 +327,43 @@ export const TestingTab: React.FC<TestingTabProps> = ({
         >
           {schedulingAlarm
             ? 'Scheduling...'
-            : `Schedule Test Alarm (${alarmDelay}s)`}
+            : `Schedule ${getStreamLabel(alarmStream)} Test (${alarmDelay}s)`}
         </button>
 
-        {alarmResult && (
+        {alarmDispatch && (
           <div
             className={`rounded-xl border p-4 text-xs space-y-1 ${
-              alarmResult.success
+              alarmDispatch.success
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100'
                 : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
             }`}
           >
             <div className="flex items-center gap-2 font-semibold text-sm">
-              {alarmResult.success ? (
+              {alarmDispatch.success ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               ) : (
                 <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
               )}
               <span>
-                {alarmResult.success
-                  ? `Queued (${alarmResult.mode})`
+                {alarmDispatch.success
+                  ? `Queued (${alarmDispatch.mode})`
                   : 'Test Alarm Failed'}
               </span>
             </div>
-            <p className="leading-relaxed">{alarmResult.message}</p>
-            {alarmResult.nextTriggerAt > 0 && (
+            <p className="leading-relaxed">{alarmDispatch.message}</p>
+            {alarmDispatch.nextTriggerAt > 0 && (
               <p className="font-mono-tabular text-slate-300">
-                Scheduled fire time: {formatTimestamp(alarmResult.nextTriggerAt)}
+                Scheduled fire time: {formatTimestamp(alarmDispatch.nextTriggerAt)}
               </p>
             )}
           </div>
+        )}
+
+        {lastTestAlarmResult && (
+          <TestResultCard
+            title="Last Background Alarm Execution"
+            result={lastTestAlarmResult}
+          />
         )}
       </section>
 
@@ -310,7 +374,7 @@ export const TestingTab: React.FC<TestingTabProps> = ({
             <PhoneCall className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
             <div>
               <h2 className="text-base font-semibold text-slate-100">
-                WhatsApp Call Volume Limitation & Live Probe
+                WhatsApp Call Volume Limitation &amp; Live Probe
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
                 Empirical stream checker for VoIP calls on your device
@@ -392,7 +456,7 @@ export const TestingTab: React.FC<TestingTabProps> = ({
             <Power className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
             <div>
               <h2 className="text-base font-semibold text-slate-100">
-                Reboot & App-Update Persistence Test
+                Reboot &amp; App-Update Persistence Test
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
                 Native BootCompletedReceiver restores all AlarmManager schedules after restart
@@ -435,10 +499,6 @@ export const TestingTab: React.FC<TestingTabProps> = ({
             </div>
           </div>
         </div>
-
-        <p className="text-xs text-slate-400 leading-relaxed">
-          To verify on your Vivo T5x 5G: ensure Battery Optimization is unrestricted in Permissions, restart the phone, unlock once, and reopen this screen—the Last Boot Restore timestamp above will update automatically from native SharedPreferences.
-        </p>
       </section>
 
       {/* Section 5: Real Native Execution Log */}
@@ -469,7 +529,7 @@ export const TestingTab: React.FC<TestingTabProps> = ({
           </p>
         ) : (
           <div className="divide-y divide-slate-800/80">
-            {logs.slice(0, 12).map((entry) => (
+            {logs.slice(0, 15).map((entry) => (
               <div key={entry.id} className="py-3 flex items-start justify-between gap-3 text-xs">
                 <div className="min-w-0 space-y-0.5">
                   <div className="flex items-center gap-2 font-medium text-slate-200">
@@ -481,6 +541,14 @@ export const TestingTab: React.FC<TestingTabProps> = ({
                     <span>{entry.source}</span>
                     <span className="text-slate-600" aria-hidden="true">·</span>
                     <span className="text-cyan-300">{getStreamLabel(entry.stream)}</span>
+                    {entry.maxIndex > 0 && (
+                      <>
+                        <span className="text-slate-600" aria-hidden="true">·</span>
+                        <span className="font-mono-tabular text-slate-300">
+                          {entry.actualIndex}/{entry.maxIndex} ({entry.actualPercentage}%)
+                        </span>
+                      </>
+                    )}
                   </div>
                   <p className="text-slate-400 leading-relaxed">{entry.message}</p>
                 </div>

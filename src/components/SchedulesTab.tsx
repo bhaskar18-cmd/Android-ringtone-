@@ -2,11 +2,11 @@ import React from 'react';
 import { CalendarClock, Edit3, Plus, Trash2 } from 'lucide-react';
 import type { VolumeSchedule } from '../types/volume';
 import {
+  STREAM_OPTIONS,
   formatDaysSummary,
   formatTime12h,
   formatTimestamp,
   formatTriggerRelative,
-  getStreamLabel,
 } from '../utils/formatters';
 
 interface SchedulesTabProps {
@@ -36,7 +36,7 @@ export const SchedulesTab: React.FC<SchedulesTabProps> = ({
             Volume Schedules
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Executed natively by Android AlarmManager in local time, even when closed or rebooted.
+            Each rule applies its enabled streams independently via native Android AlarmManager. Disabled streams stay untouched.
           </p>
         </div>
 
@@ -61,7 +61,7 @@ export const SchedulesTab: React.FC<SchedulesTabProps> = ({
           <CalendarClock className="w-8 h-8 text-slate-500 mx-auto" />
           <p className="text-sm font-medium text-slate-200">No volume schedules configured</p>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Add a daily or weekday schedule to adjust Ringtone, Notification, Alarm, Media, or Voice Call levels automatically.
+            Add a daily or weekday schedule to adjust Media, Ringtone, Notification, Alarm, or Voice Call levels automatically.
           </p>
           <button
             type="button"
@@ -75,6 +75,9 @@ export const SchedulesTab: React.FC<SchedulesTabProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
           {schedules.map((item) => {
             const isBusy = busyId === item.id;
+            const enabledStreams = STREAM_OPTIONS.filter(
+              (opt) => item.streams[opt.key]?.enabled
+            );
             return (
               <div
                 key={item.id}
@@ -84,43 +87,61 @@ export const SchedulesTab: React.FC<SchedulesTabProps> = ({
                     : 'border-slate-800/50 opacity-75'
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-baseline gap-2.5 flex-wrap">
-                      <span className="text-2xl font-bold font-mono-tabular text-slate-100">
-                        {formatTime12h(item.time)}
-                      </span>
-                      <span className="text-base font-semibold font-mono-tabular text-cyan-300">
-                        {item.percentage}%
-                      </span>
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-baseline gap-2.5 flex-wrap">
+                        <span className="text-2xl font-bold font-mono-tabular text-slate-100">
+                          {formatTime12h(item.time)}
+                        </span>
+                        {item.label && (
+                          <span className="text-sm font-medium text-slate-300 truncate">
+                            {item.label}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {formatDaysSummary(item.days)}
+                      </p>
                     </div>
-                    <p className="text-sm font-medium text-slate-200 mt-1 truncate">
-                      {getStreamLabel(item.stream)}
-                      {item.label ? ` · ${item.label}` : ''}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      {formatDaysSummary(item.days)}
-                    </p>
+
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={item.enabled}
+                      aria-label={`Toggle ${item.label || item.time} schedule`}
+                      disabled={isBusy}
+                      onClick={() => void onToggleRule(item.id, !item.enabled)}
+                      className="min-h-[44px] min-w-[52px] flex items-center justify-end shrink-0"
+                    >
+                      <span
+                        className={`w-12 h-7 rounded-full p-1 transition-colors flex items-center ${
+                          item.enabled ? 'bg-cyan-400 justify-end' : 'bg-slate-700 justify-start'
+                        }`}
+                      >
+                        <span className="w-5 h-5 rounded-full bg-[#0B111A] shadow" />
+                      </span>
+                    </button>
                   </div>
 
-                  {/* Accessible native-style switch */}
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={item.enabled}
-                    aria-label={`Toggle ${item.label || item.time} schedule`}
-                    disabled={isBusy}
-                    onClick={() => void onToggleRule(item.id, !item.enabled)}
-                    className="min-h-[44px] min-w-[52px] flex items-center justify-end shrink-0"
-                  >
-                    <span
-                      className={`w-12 h-7 rounded-full p-1 transition-colors flex items-center ${
-                        item.enabled ? 'bg-cyan-400 justify-end' : 'bg-slate-700 justify-start'
-                      }`}
-                    >
-                      <span className="w-5 h-5 rounded-full bg-[#0B111A] shadow" />
-                    </span>
-                  </button>
+                  {/* Per-stream targets list */}
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-slate-800/70 text-xs">
+                    {enabledStreams.length === 0 ? (
+                      <span className="text-slate-500 col-span-2">No streams enabled</span>
+                    ) : (
+                      enabledStreams.map((opt) => (
+                        <div
+                          key={opt.key}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <span className="text-slate-400 truncate">{opt.label}</span>
+                          <span className="font-mono-tabular font-semibold text-cyan-300">
+                            {item.streams[opt.key].percentage}%
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
 
                 <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
@@ -135,8 +156,10 @@ export const SchedulesTab: React.FC<SchedulesTabProps> = ({
                         className={`truncate mt-0.5 ${
                           item.lastExecutionSuccess ? 'text-slate-500' : 'text-rose-400'
                         }`}
+                        title={item.lastExecutionMessage}
                       >
                         Last run: {formatTimestamp(item.lastExecutedAt)}
+                        {item.lastExecutionMessage ? ` · ${item.lastExecutionMessage}` : ''}
                       </div>
                     )}
                   </div>
@@ -169,8 +192,8 @@ export const SchedulesTab: React.FC<SchedulesTabProps> = ({
       )}
 
       <div className="bg-[#121A26] border border-slate-800/90 rounded-2xl p-4 text-xs text-slate-400 leading-relaxed">
-        <span className="font-semibold text-slate-200">Midnight-crossing behavior: </span>
-        Each rule calculates its next local timestamp strictly ahead of the current clock and reschedules the following day or weekday immediately after firing—so overnight pairs like Night Mode at 8:00 PM and Day Mode at 8:00 AM transition seamlessly across midnight.
+        <span className="font-semibold text-slate-200">Persistent volume behavior: </span>
+        Applied levels remain in place until another scheduled rule fires or you adjust device volume manually. Unchecked streams in a rule are left untouched.
       </div>
     </div>
   );

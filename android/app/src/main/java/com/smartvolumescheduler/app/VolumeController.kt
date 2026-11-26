@@ -4,8 +4,9 @@ import android.app.NotificationManager
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.RingtoneManager
-import android.media.ToneGenerator
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -121,28 +122,37 @@ object VolumeController {
             )
         }
 
-        val span = (maxIndex - minIndex).coerceAtLeast(0)
-        val targetIndex = (minIndex + ((clampedPct / 100.0) * span).roundToInt()).coerceIn(minIndex, maxIndex)
+        // Map percentage directly to Android's 0..maxIndex range and clamp to [minIndex, maxIndex]
+        val rawTargetIndex = ((clampedPct / 100.0) * maxIndex).roundToInt()
+        val targetIndex = rawTargetIndex.coerceIn(minIndex, maxIndex)
         val flags = if (showSystemUi) AudioManager.FLAG_SHOW_UI else 0
 
         return try {
+            // If setting Ringtone > 0 while device is in silent/vibrate, restore normal ringer mode first
+            if (stream == AudioStreamType.RINGTONE && targetIndex > 0 && am.ringerMode != AudioManager.RINGER_MODE_NORMAL) {
+                am.ringerMode = AudioManager.RINGER_MODE_NORMAL
+            }
+
             am.setStreamVolume(stream.androidStream, targetIndex, flags)
+
             val actualIndex = am.getStreamVolume(stream.androidStream)
             val actualPct = ((actualIndex.toDouble() / maxIndex.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
-            val matched = actualIndex == targetIndex
+            val appliedToHardware = (actualIndex == targetIndex)
+            val exactRequested = appliedToHardware && (rawTargetIndex == targetIndex)
+            val dndAccessGranted = nm.isNotificationPolicyAccessGranted
 
             val note = when {
-                matched && clampedPct == 0 && minIndex > 0 ->
-                    "Applied minimum supported level $actualIndex/$maxIndex ($actualPct%). Android enforces min index $minIndex for ${stream.label}."
-                matched ->
-                    "Set ${stream.label} to $actualIndex/$maxIndex ($actualPct%)."
+                !appliedToHardware ->
+                    "Requested ${stream.label} index $targetIndex/$maxIndex ($clampedPct%), but Android kept level at $actualIndex/$maxIndex ($actualPct%)."
+                rawTargetIndex < minIndex ->
+                    "Applied minimum supported level $actualIndex/$maxIndex ($actualPct%) for ${stream.label} (Android enforces min index $minIndex)."
                 else ->
-                    "Requested index $targetIndex/$maxIndex, Android clamped actual level to $actualIndex/$maxIndex ($actualPct%)."
+                    "Applied ${stream.label}: $actualIndex/$maxIndex ($actualPct% achieved for $clampedPct% requested)."
             }
 
             VolumeApplyResult(
-                success = true,
-                appliedExactTarget = matched,
+                success = appliedToHardware,
+                appliedExactTarget = exactRequested,
                 stream = stream.key,
                 requestedPercentage = clampedPct,
                 targetIndex = targetIndex,
@@ -150,7 +160,7 @@ object VolumeController {
                 actualPercentage = actualPct,
                 minIndex = minIndex,
                 maxIndex = maxIndex,
-                dndBlocked = false,
+                dndBlocked = !appliedToHardware && !dndAccessGranted,
                 fixedVolume = false,
                 message = note
             )
@@ -197,57 +207,276 @@ object VolumeController {
         }
     }
 
-    fun playBriefProbeTone(context: Context, stream: AudioStreamType): Pair<Boolean, String> {
-        return try {
-            when (stream) {
-                AudioStreamType.NOTIFICATION, AudioStreamType.RINGTONE, AudioStreamType.ALARM -> {
-                    val uriType = when (stream) {
-                        AudioStreamType.ALARM -> RingtoneManager.TYPE_ALARM
-                        AudioStreamType.RINGTONE -> RingtoneManager.TYPE_RINGTONE
-                        else -> RingtoneManager.TYPE_NOTIFICATION
-                    }
-                    val uri = RingtoneManager.getDefaultUri(uriType)
-                    val ringtone = RingtoneManager.getRingtone(context, uri)
-                    if (ringtone != null) {
-                        val usage = when (stream) {
-                            AudioStreamType.ALARM -> AudioAttributes.USAGE_ALARM
-                            AudioStreamType.RINGTONE -> AudioAttributes.USAGE_NOTIFICATION_RINGTONE
-                            else -> AudioAttributes.USAGE_NOTIFICATION
-                        }
-                        ringtone.audioAttributes = AudioAttributes.Builder()
-                            .setUsage(usage)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                        ringtone.play()
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            try {
-                                if (ringtone.isPlaying) ringtone.stop()
-                            } catch (_: Exception) {
-                            }
-                        }, 1100L)
-                        true to "Played 1.1s ${stream.label} audio probe."
-                    } else {
-                        playToneGenerator(stream.androidStream, stream.label)
-                    }
-                }
-                AudioStreamType.MEDIA, AudioStreamType.VOICE_CALL -> {
-                    playToneGenerator(stream.androidStream, stream.label)
-                }
+    fun runStreamTest(
+        context: Context,
+        stream: AudioStreamType,
+        requestedPercentage: Int?,
+        source: String,
+        onPlaybackComplete: (() -> Unit)? = null
+    ): StreamTestResult {
+        val am = getAudioManager(context)
+        val targetPct = requestedPercentage ?: run {
+            val cur = am.getStreamVolume(stream.androidStream)
+            val max = am.getStreamMaxVolume(stream.androidStream).coerceAtLeast(1)
+            ((cur.toDouble() / max.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+        }
+
+        val applyResult = applyVolume(context, stream.key, targetPct, showSystemUi = false)
+        val audioModeStr = getAudioModeString(am)
+        val ringerModeStr = getRingerModeString(am)
+        val callSessionActive = am.mode == AudioManager.MODE_IN_CALL ||
+            am.mode == AudioManager.MODE_IN_COMMUNICATION
+
+        if (!applyResult.success) {
+            onPlaybackComplete?.invoke()
+            return StreamTestResult(
+                stream = stream.key,
+                requestedPercentage = applyResult.requestedPercentage,
+                targetIndex = applyResult.targetIndex,
+                actualIndex = applyResult.actualIndex,
+                minIndex = applyResult.minIndex,
+                maxIndex = applyResult.maxIndex,
+                actualPercentage = applyResult.actualPercentage,
+                volumeApplied = false,
+                playbackStarted = false,
+                streamVerified = false,
+                callSessionActive = callSessionActive,
+                audioMode = audioModeStr,
+                ringerMode = ringerModeStr,
+                dndBlocked = applyResult.dndBlocked,
+                fixedVolume = applyResult.fixedVolume,
+                source = source,
+                timestamp = System.currentTimeMillis(),
+                message = applyResult.message
+            )
+        }
+
+        if (stream == AudioStreamType.VOICE_CALL) {
+            onPlaybackComplete?.invoke()
+            val msg = if (callSessionActive) {
+                "Voice Call volume set to ${applyResult.actualIndex}/${applyResult.maxIndex} (${applyResult.actualPercentage}%) during active $audioModeStr session. No notification sound was substituted."
+            } else {
+                "Voice Call volume index set to ${applyResult.actualIndex}/${applyResult.maxIndex} (${applyResult.actualPercentage}%), but actual call loudness could not be verified because no call or communication audio session is active ($audioModeStr). Test during a real phone or VoIP call to verify call loudness."
             }
-        } catch (ex: Exception) {
-            false to "Audio probe could not play on ${stream.label}: ${ex.message ?: "audio focus unavailable"}"
+            return StreamTestResult(
+                stream = stream.key,
+                requestedPercentage = applyResult.requestedPercentage,
+                targetIndex = applyResult.targetIndex,
+                actualIndex = applyResult.actualIndex,
+                minIndex = applyResult.minIndex,
+                maxIndex = applyResult.maxIndex,
+                actualPercentage = applyResult.actualPercentage,
+                volumeApplied = true,
+                playbackStarted = false,
+                streamVerified = callSessionActive,
+                callSessionActive = callSessionActive,
+                audioMode = audioModeStr,
+                ringerMode = ringerModeStr,
+                dndBlocked = false,
+                fixedVolume = false,
+                source = source,
+                timestamp = System.currentTimeMillis(),
+                message = msg
+            )
+        }
+
+        val (playbackStarted, playbackMsg) = playStreamAudioSample(context, stream, onPlaybackComplete)
+        val verified = applyResult.success && playbackStarted
+        val fullMessage = "${applyResult.message} $playbackMsg"
+
+        return StreamTestResult(
+            stream = stream.key,
+            requestedPercentage = applyResult.requestedPercentage,
+            targetIndex = applyResult.targetIndex,
+            actualIndex = applyResult.actualIndex,
+            minIndex = applyResult.minIndex,
+            maxIndex = applyResult.maxIndex,
+            actualPercentage = applyResult.actualPercentage,
+            volumeApplied = true,
+            playbackStarted = playbackStarted,
+            streamVerified = verified,
+            callSessionActive = callSessionActive,
+            audioMode = audioModeStr,
+            ringerMode = ringerModeStr,
+            dndBlocked = false,
+            fixedVolume = false,
+            source = source,
+            timestamp = System.currentTimeMillis(),
+            message = fullMessage
+        )
+    }
+
+    private fun playStreamAudioSample(
+        context: Context,
+        stream: AudioStreamType,
+        onPlaybackComplete: (() -> Unit)?
+    ): Pair<Boolean, String> {
+        return when (stream) {
+            AudioStreamType.MEDIA -> playBundledMediaWav(context, onPlaybackComplete)
+            AudioStreamType.RINGTONE -> playSystemUriOnStream(
+                context = context,
+                uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                usage = AudioAttributes.USAGE_NOTIFICATION_RINGTONE,
+                contentType = AudioAttributes.CONTENT_TYPE_SONIFICATION,
+                label = "Ringtone",
+                durationMs = 1500L,
+                onPlaybackComplete = onPlaybackComplete
+            )
+            AudioStreamType.NOTIFICATION -> playSystemUriOnStream(
+                context = context,
+                uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                usage = AudioAttributes.USAGE_NOTIFICATION,
+                contentType = AudioAttributes.CONTENT_TYPE_SONIFICATION,
+                label = "Notification",
+                durationMs = 1300L,
+                onPlaybackComplete = onPlaybackComplete
+            )
+            AudioStreamType.ALARM -> playSystemUriOnStream(
+                context = context,
+                uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+                usage = AudioAttributes.USAGE_ALARM,
+                contentType = AudioAttributes.CONTENT_TYPE_SONIFICATION,
+                label = "Alarm",
+                durationMs = 1500L,
+                onPlaybackComplete = onPlaybackComplete
+            )
+            AudioStreamType.VOICE_CALL -> {
+                onPlaybackComplete?.invoke()
+                false to "Voice Call does not play a substitute notification sound."
+            }
         }
     }
 
-    private fun playToneGenerator(streamType: Int, label: String): Pair<Boolean, String> {
-        val tone = ToneGenerator(streamType, 80)
-        tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 500)
-        Handler(Looper.getMainLooper()).postDelayed({
-            try {
-                tone.release()
-            } catch (_: Exception) {
+    private fun playBundledMediaWav(
+        context: Context,
+        onPlaybackComplete: (() -> Unit)?
+    ): Pair<Boolean, String> {
+        val player = MediaPlayer()
+        var released = false
+        val mainHandler = Handler(Looper.getMainLooper())
+        val releaseOnce = {
+            if (!released) {
+                released = true
+                try {
+                    if (player.isPlaying) player.stop()
+                } catch (_: Exception) {
+                }
+                try {
+                    player.release()
+                } catch (_: Exception) {
+                }
+                onPlaybackComplete?.invoke()
             }
-        }, 650L)
-        return true to "Played 500ms tone probe on $label stream."
+        }
+
+        return try {
+            val afd = context.resources.openRawResourceFd(R.raw.media_test_tone)
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            player.setOnCompletionListener { releaseOnce() }
+            player.setOnErrorListener { _, _, _ ->
+                releaseOnce()
+                true
+            }
+            player.prepare()
+            player.start()
+            mainHandler.postDelayed({ releaseOnce() }, 1800L)
+            true to "Started bundled local WAV playback on Media stream (STREAM_MUSIC)."
+        } catch (ex: Exception) {
+            releaseOnce()
+            false to "Failed to play bundled Media test audio: ${ex.message ?: "unknown error"}"
+        }
+    }
+
+    private fun playSystemUriOnStream(
+        context: Context,
+        uri: Uri?,
+        usage: Int,
+        contentType: Int,
+        label: String,
+        durationMs: Long,
+        onPlaybackComplete: (() -> Unit)?
+    ): Pair<Boolean, String> {
+        if (uri == null) {
+            onPlaybackComplete?.invoke()
+            return false to "No default $label sound URI configured on device."
+        }
+
+        val player = MediaPlayer()
+        var released = false
+        val mainHandler = Handler(Looper.getMainLooper())
+        val releaseOnce = {
+            if (!released) {
+                released = true
+                try {
+                    if (player.isPlaying) player.stop()
+                } catch (_: Exception) {
+                }
+                try {
+                    player.release()
+                } catch (_: Exception) {
+                }
+                onPlaybackComplete?.invoke()
+            }
+        }
+
+        return try {
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(usage)
+                    .setContentType(contentType)
+                    .build()
+            )
+            player.setDataSource(context.applicationContext, uri)
+            player.setOnCompletionListener { releaseOnce() }
+            player.setOnErrorListener { _, _, _ ->
+                releaseOnce()
+                true
+            }
+            player.prepare()
+            player.start()
+            mainHandler.postDelayed({ releaseOnce() }, durationMs)
+            true to "Started real $label sound playback on $label stream."
+        } catch (ex: Exception) {
+            releaseOnce()
+            // Fallback to Ringtone API on the exact same stream usage (never substitutes another stream)
+            try {
+                val ringtone = RingtoneManager.getRingtone(context.applicationContext, uri)
+                if (ringtone != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        ringtone.audioAttributes = AudioAttributes.Builder()
+                            .setUsage(usage)
+                            .setContentType(contentType)
+                            .build()
+                    } else {
+                        @Suppress("DEPRECATION")
+                        ringtone.streamType = when (usage) {
+                            AudioAttributes.USAGE_ALARM -> AudioManager.STREAM_ALARM
+                            AudioAttributes.USAGE_NOTIFICATION_RINGTONE -> AudioManager.STREAM_RING
+                            else -> AudioManager.STREAM_NOTIFICATION
+                        }
+                    }
+                    ringtone.play()
+                    mainHandler.postDelayed({
+                        try {
+                            if (ringtone.isPlaying) ringtone.stop()
+                        } catch (_: Exception) {
+                        }
+                        onPlaybackComplete?.invoke()
+                    }, durationMs)
+                    true to "Started real $label ringtone playback on $label stream."
+                } else {
+                    false to "Failed to start $label playback: ${ex.message ?: "unavailable"}"
+                }
+            } catch (fallbackEx: Exception) {
+                false to "Failed to start $label playback: ${fallbackEx.message ?: ex.message ?: "unavailable"}"
+            }
+        }
     }
 }

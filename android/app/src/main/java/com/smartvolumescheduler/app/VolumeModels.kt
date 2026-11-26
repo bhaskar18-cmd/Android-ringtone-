@@ -9,10 +9,10 @@ enum class AudioStreamType(
     val label: String,
     val androidStream: Int
 ) {
+    MEDIA("media", "Media", AudioManager.STREAM_MUSIC),
     RINGTONE("ringtone", "Ringtone", AudioManager.STREAM_RING),
     NOTIFICATION("notification", "Notification", AudioManager.STREAM_NOTIFICATION),
     ALARM("alarm", "Alarm", AudioManager.STREAM_ALARM),
-    MEDIA("media", "Media", AudioManager.STREAM_MUSIC),
     VOICE_CALL("voice_call", "Voice Call", AudioManager.STREAM_VOICE_CALL);
 
     companion object {
@@ -22,12 +22,35 @@ enum class AudioStreamType(
     }
 }
 
+data class StreamRuleConfig(
+    val enabled: Boolean,
+    val percentage: Int
+) {
+    fun toJson(): JSONObject {
+        return JSONObject().apply {
+            put("enabled", enabled)
+            put("percentage", percentage.coerceIn(0, 100))
+        }
+    }
+
+    companion object {
+        fun fromJson(obj: JSONObject?, defaultEnabled: Boolean = false, defaultPct: Int = 70): StreamRuleConfig {
+            if (obj == null) {
+                return StreamRuleConfig(defaultEnabled, defaultPct.coerceIn(0, 100))
+            }
+            return StreamRuleConfig(
+                enabled = obj.optBoolean("enabled", defaultEnabled),
+                percentage = obj.optInt("percentage", defaultPct).coerceIn(0, 100)
+            )
+        }
+    }
+}
+
 data class VolumeSchedule(
     val id: String,
     val label: String,
     val time: String, // 24h HH:mm
-    val stream: String,
-    val percentage: Int,
+    val streams: Map<String, StreamRuleConfig>,
     val days: List<Int>, // 0=Sun .. 6=Sat
     val enabled: Boolean,
     val nextTriggerAt: Long = 0L,
@@ -40,8 +63,14 @@ data class VolumeSchedule(
         obj.put("id", id)
         obj.put("label", label)
         obj.put("time", time)
-        obj.put("stream", stream)
-        obj.put("percentage", percentage)
+
+        val streamsObj = JSONObject()
+        AudioStreamType.entries.forEach { st ->
+            val cfg = streams[st.key] ?: StreamRuleConfig(false, 70)
+            streamsObj.put(st.key, cfg.toJson())
+        }
+        obj.put("streams", streamsObj)
+
         val daysArray = JSONArray()
         days.forEach { daysArray.put(it) }
         obj.put("days", daysArray)
@@ -54,6 +83,16 @@ data class VolumeSchedule(
     }
 
     companion object {
+        fun defaultStreams(
+            overrides: Map<String, StreamRuleConfig> = emptyMap()
+        ): Map<String, StreamRuleConfig> {
+            val result = linkedMapOf<String, StreamRuleConfig>()
+            AudioStreamType.entries.forEach { st ->
+                result[st.key] = overrides[st.key] ?: StreamRuleConfig(false, 70)
+            }
+            return result
+        }
+
         fun fromJson(obj: JSONObject): VolumeSchedule {
             val daysList = mutableListOf<Int>()
             val daysArray = obj.optJSONArray("days")
@@ -68,12 +107,35 @@ data class VolumeSchedule(
             if (daysList.isEmpty()) {
                 daysList.addAll(listOf(0, 1, 2, 3, 4, 5, 6))
             }
+
+            val streamsObj = obj.optJSONObject("streams")
+            val parsedStreams = linkedMapOf<String, StreamRuleConfig>()
+            if (streamsObj != null) {
+                AudioStreamType.entries.forEach { st ->
+                    parsedStreams[st.key] = StreamRuleConfig.fromJson(
+                        streamsObj.optJSONObject(st.key),
+                        defaultEnabled = false,
+                        defaultPct = 70
+                    )
+                }
+            } else {
+                // Migrate legacy single-stream rule cleanly
+                val legacyStream = obj.optString("stream", AudioStreamType.RINGTONE.key)
+                val legacyPct = obj.optInt("percentage", 100).coerceIn(0, 100)
+                AudioStreamType.entries.forEach { st ->
+                    if (st.key.equals(legacyStream, ignoreCase = true)) {
+                        parsedStreams[st.key] = StreamRuleConfig(true, legacyPct)
+                    } else {
+                        parsedStreams[st.key] = StreamRuleConfig(false, 70)
+                    }
+                }
+            }
+
             return VolumeSchedule(
                 id = obj.optString("id"),
                 label = obj.optString("label", ""),
                 time = obj.optString("time", "08:00"),
-                stream = obj.optString("stream", AudioStreamType.RINGTONE.key),
-                percentage = obj.optInt("percentage", 100).coerceIn(0, 100),
+                streams = parsedStreams,
                 days = daysList.sorted(),
                 enabled = obj.optBoolean("enabled", true),
                 nextTriggerAt = obj.optLong("nextTriggerAt", 0L),
@@ -117,10 +179,79 @@ data class VolumeApplyResult(
     }
 }
 
+data class StreamTestResult(
+    val stream: String,
+    val requestedPercentage: Int,
+    val targetIndex: Int,
+    val actualIndex: Int,
+    val minIndex: Int,
+    val maxIndex: Int,
+    val actualPercentage: Int,
+    val volumeApplied: Boolean,
+    val playbackStarted: Boolean,
+    val streamVerified: Boolean,
+    val callSessionActive: Boolean,
+    val audioMode: String,
+    val ringerMode: String,
+    val dndBlocked: Boolean,
+    val fixedVolume: Boolean,
+    val source: String,
+    val timestamp: Long,
+    val message: String
+) {
+    fun toJson(): JSONObject {
+        return JSONObject().apply {
+            put("stream", stream)
+            put("requestedPercentage", requestedPercentage)
+            put("targetIndex", targetIndex)
+            put("actualIndex", actualIndex)
+            put("minIndex", minIndex)
+            put("maxIndex", maxIndex)
+            put("actualPercentage", actualPercentage)
+            put("volumeApplied", volumeApplied)
+            put("playbackStarted", playbackStarted)
+            put("streamVerified", streamVerified)
+            put("callSessionActive", callSessionActive)
+            put("audioMode", audioMode)
+            put("ringerMode", ringerMode)
+            put("dndBlocked", dndBlocked)
+            put("fixedVolume", fixedVolume)
+            put("source", source)
+            put("timestamp", timestamp)
+            put("message", message)
+        }
+    }
+
+    companion object {
+        fun fromJson(obj: JSONObject): StreamTestResult {
+            return StreamTestResult(
+                stream = obj.optString("stream", ""),
+                requestedPercentage = obj.optInt("requestedPercentage", 0),
+                targetIndex = obj.optInt("targetIndex", 0),
+                actualIndex = obj.optInt("actualIndex", 0),
+                minIndex = obj.optInt("minIndex", 0),
+                maxIndex = obj.optInt("maxIndex", 0),
+                actualPercentage = obj.optInt("actualPercentage", 0),
+                volumeApplied = obj.optBoolean("volumeApplied", false),
+                playbackStarted = obj.optBoolean("playbackStarted", false),
+                streamVerified = obj.optBoolean("streamVerified", false),
+                callSessionActive = obj.optBoolean("callSessionActive", false),
+                audioMode = obj.optString("audioMode", "MODE_NORMAL"),
+                ringerMode = obj.optString("ringerMode", "normal"),
+                dndBlocked = obj.optBoolean("dndBlocked", false),
+                fixedVolume = obj.optBoolean("fixedVolume", false),
+                source = obj.optString("source", "FOREGROUND_TEST"),
+                timestamp = obj.optLong("timestamp", 0L),
+                message = obj.optString("message", "")
+            )
+        }
+    }
+}
+
 data class ExecutionLogEntry(
     val id: String,
     val timestamp: Long,
-    val source: String, // SCHEDULE | TEST_ALARM | MANUAL | BOOT_RESTORE | SYSTEM_EVENT
+    val source: String, // SCHEDULE | BACKGROUND_TEST_ALARM | MANUAL | FOREGROUND_TEST | BOOT_RESTORE
     val scheduleId: String,
     val stream: String,
     val requestedPercentage: Int,

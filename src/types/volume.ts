@@ -1,8 +1,8 @@
 export type AudioStreamKey =
+  | 'media'
   | 'ringtone'
   | 'notification'
   | 'alarm'
-  | 'media'
   | 'voice_call';
 
 export interface StreamSnapshot {
@@ -14,12 +14,18 @@ export interface StreamSnapshot {
   percentage: number;
 }
 
+export interface StreamRuleConfig {
+  enabled: boolean;
+  percentage: number;
+}
+
+export type RuleStreamsMap = Record<AudioStreamKey, StreamRuleConfig>;
+
 export interface VolumeSchedule {
   id: string;
   label: string;
   time: string; // 24-hour local HH:mm
-  stream: AudioStreamKey;
-  percentage: number;
+  streams: RuleStreamsMap;
   days: number[]; // 0 = Sun, 1 = Mon, ..., 6 = Sat
   enabled: boolean;
   nextTriggerAt: number;
@@ -37,7 +43,14 @@ export interface BootRestoreInfo {
 export interface ExecutionLogEntry {
   id: string;
   timestamp: number;
-  source: 'SCHEDULE' | 'TEST_ALARM' | 'MANUAL' | 'STREAM_TEST' | 'BOOT_RESTORE' | 'SYSTEM_EVENT' | string;
+  source:
+    | 'SCHEDULE'
+    | 'BACKGROUND_TEST_ALARM'
+    | 'MANUAL'
+    | 'FOREGROUND_TEST'
+    | 'BOOT_RESTORE'
+    | 'SYSTEM_EVENT'
+    | string;
   scheduleId: string;
   stream: string;
   requestedPercentage: number;
@@ -55,6 +68,27 @@ export interface DeviceInfo {
   sdkInt: number;
 }
 
+export interface StreamTestResult {
+  stream: AudioStreamKey | string;
+  requestedPercentage: number;
+  targetIndex: number;
+  actualIndex: number;
+  minIndex: number;
+  maxIndex: number;
+  actualPercentage: number;
+  volumeApplied: boolean;
+  playbackStarted: boolean;
+  streamVerified: boolean;
+  callSessionActive: boolean;
+  audioMode: string;
+  ringerMode: string;
+  dndBlocked: boolean;
+  fixedVolume: boolean;
+  source: string;
+  timestamp: number;
+  message: string;
+}
+
 export interface VolumeSettingsResponse {
   native: boolean;
   streams: Record<AudioStreamKey, StreamSnapshot>;
@@ -67,6 +101,7 @@ export interface VolumeSettingsResponse {
   nextScheduledChange: VolumeSchedule | null;
   bootRestore: BootRestoreInfo;
   recentLogs: ExecutionLogEntry[];
+  lastTestAlarmResult: StreamTestResult | null;
   deviceInfo: DeviceInfo | null;
 }
 
@@ -89,8 +124,7 @@ export interface ScheduleVolumeChangeParams {
   id?: string;
   label?: string;
   time: string;
-  stream: AudioStreamKey;
-  percentage: number;
+  streams: RuleStreamsMap;
   days: number[];
   enabled?: boolean;
 }
@@ -150,14 +184,6 @@ export interface RequestPermissionResponse {
   status: PermissionStatusResponse;
 }
 
-export interface StreamTestResponse {
-  applyResult: VolumeApplyResult;
-  tonePlayed: boolean;
-  toneMessage: string;
-  audioMode: string;
-  ringerMode: string;
-}
-
 export interface TestAlarmResponse {
   success: boolean;
   exact: boolean;
@@ -215,8 +241,7 @@ export interface VolumeSchedulerPluginInterface {
   testVolumeStream(options: {
     stream: AudioStreamKey;
     percentage?: number;
-    playTone?: boolean;
-  }): Promise<StreamTestResponse>;
+  }): Promise<StreamTestResult>;
   scheduleTestAlarm(options: {
     secondsFromNow: number;
     stream: AudioStreamKey;
@@ -225,6 +250,7 @@ export interface VolumeSchedulerPluginInterface {
   getExecutionLogs(): Promise<{
     logs: ExecutionLogEntry[];
     bootRestore: BootRestoreInfo;
+    lastTestAlarmResult: StreamTestResult | null;
   }>;
   getAudioModeProbe(): Promise<AudioModeProbeResponse>;
   addListener(
