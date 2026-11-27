@@ -344,9 +344,272 @@ class VolumeSchedulerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun getVolumeProfiles(call: PluginCall) {
+        val profiles = VolumeSchedulerStorage.getProfiles(context)
+        val overlap = VolumeProfileManager.detectOverlaps(profiles)
+        val resolution = VolumeProfileManager.resolveProfileAt(context)
+        val defaultProfileId = VolumeSchedulerStorage.getDefaultProfileId(context)
+        val nextTransitionAt = VolumeSchedulerStorage.getNextProfileTransitionAt(context)
+
+        val arr = JSArray()
+        profiles.forEach { arr.put(it.toJson()) }
+
+        call.resolve(JSObject().apply {
+            put("schedulerEnabled", VolumeSchedulerStorage.isSchedulerEnabled(context))
+            put("profiles", arr)
+            if (defaultProfileId != null) {
+                put("defaultProfileId", defaultProfileId)
+            } else {
+                put("defaultProfileId", JSONObject.NULL)
+            }
+            put("profileOverlap", JSObject.fromJSONObject(overlap.toJson()))
+            put("activeProfileResolution", JSObject.fromJSONObject(resolution.toJson()))
+            put("nextProfileTransitionAt", nextTransitionAt)
+        })
+    }
+
+    @PluginMethod
+    fun saveVolumeProfile(call: PluginCall) {
+        val name = call.getString("name")?.trim()
+        val startTime = call.getString("startTime")?.trim()
+        val endTime = call.getString("endTime")?.trim()
+        if (name.isNullOrBlank() || startTime.isNullOrBlank() || endTime.isNullOrBlank()) {
+            call.reject("Missing required profile parameters: name, startTime, endTime.")
+            return
+        }
+        if (startTime == endTime) {
+            call.reject("Start time and end time cannot be identical.")
+            return
+        }
+
+        val id = call.getString("id")?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
+        val existing = VolumeSchedulerStorage.getProfileById(context, id)
+        val icon = call.getString("icon")?.trim()?.takeIf { it.isNotBlank() } ?: existing?.icon ?: "sun"
+        val enabled = call.getBoolean("enabled") ?: existing?.enabled ?: true
+        val priority = call.getInt("priority") ?: existing?.priority ?: 0
+
+        val streamsObj = call.getObject("streams")
+        val parsedStreams = linkedMapOf<String, StreamRuleConfig>()
+        AudioStreamType.entries.forEach { st ->
+            parsedStreams[st.key] = StreamRuleConfig.fromJson(
+                streamsObj?.optJSONObject(st.key),
+                defaultEnabled = true,
+                defaultPct = 70
+            )
+        }
+
+        if (parsedStreams.values.none { it.enabled }) {
+            call.reject("Enable at least one audio stream in the profile.")
+            return
+        }
+
+        val configChanged = existing == null ||
+            existing.startTime != startTime ||
+            existing.endTime != endTime ||
+            existing.streams != parsedStreams ||
+            existing.priority != priority
+
+        val profile = VolumeProfile(
+            id = id,
+            name = name,
+            icon = icon,
+            startTime = startTime,
+            endTime = endTime,
+            streams = parsedStreams,
+            enabled = enabled,
+            priority = priority,
+            lastActivatedAt = existing?.lastActivatedAt ?: 0L,
+            lastActivatedSlotMillis = if (existing != null && existing.startTime == startTime && existing.endTime == endTime) {
+                existing.lastActivatedSlotMillis
+            } else {
+                0L
+            },
+            lastExecutionSuccess = existing?.lastExecutionSuccess ?: true,
+            lastExecutionMessage = existing?.lastExecutionMessage ?: ""
+        )
+
+        VolumeSchedulerStorage.upsertProfile(context, profile)
+        val recalc = VolumeAlarmManager.recalculateProfilesAndSchedule(
+            context = context,
+            activateIfCoversNow = true,
+            forceApplyActiveIfChanged = configChanged,
+            source = "IMMEDIATE_PROFILE"
+        )
+        val saved = VolumeSchedulerStorage.getProfileById(context, id) ?: profile
+        val msg = buildProfileActionMessage("Saved \"${saved.name}\"", recalc)
+
+        call.resolve(JSObject().apply {
+            put("success", true)
+            put("profile", JSObject.fromJSONObject(saved.toJson()))
+            put("executedImmediately", recalc.executedImmediately)
+            put("mode", recalc.dispatch.mode)
+            put("profileOverlap", JSObject.fromJSONObject(recalc.overlapReport.toJson()))
+            put("activeProfileResolution", JSObject.fromJSONObject(recalc.resolution.toJson()))
+            put("nextProfileTransitionAt", VolumeSchedulerStorage.getNextProfileTransitionAt(context))
+            put("message", msg)
+        })
+    }
+
+    @PluginMethod
+    fun deleteVolumeProfile(call: PluginCall) {
+        val id = call.getString("id")
+        if (id.isNullOrBlank()) {
+            call.reject("Missing required parameter: id.")
+            return
+        }
+        val existing = VolumeSchedulerStorage.getProfileById(context, id)
+        val (deleted, _) = VolumeSchedulerStorage.deleteProfile(context, id)
+        if (deleted && existing != null) {
+            VolumeSchedulerStorage.appendLog(
+                context,
+                ExecutionLogEntry(
+                    id = UUID.randomUUID().toString(),
+                    timestamp = System.currentTimeMillis(),
+                    source = "ALARM_CANCELED",
+                    ruleId = existing.id,
+                    ruleName = existing.name,
+                    activeProfileName = "",
+                    scheduledTime = "${existing.startTime}-${existing.endTime}",
+                    stream = "system",
+                    requestedPercentage = 0,
+                    indexBefore = 0,
+                    actualIndex = 0,
+                    maxIndex = 0,
+                    actualPercentage = 0,
+                    success = true,
+                    failureReason = "",
+                    message = "Profile \"${existing.name}\" deleted and transitions recalculated."
+                )
+            )
+        }
+
+        val recalc = VolumeAlarmManager.recalculateProfilesAndSchedule(
+            context = context,
+            activateIfCoversNow = true,
+            forceApplyActiveIfChanged = false,
+            source = "PROFILE_SCHEDULE"
+        )
+
+        val remaining = VolumeSchedulerStorage.getProfiles(context)
+        val arr = JSArray()
+        remaining.forEach { arr.put(it.toJson()) }
+
+        call.resolve(JSObject().apply {
+            put("success", deleted)
+            put("deletedId", id)
+            put("profiles", arr)
+            put("profileOverlap", JSObject.fromJSONObject(recalc.overlapReport.toJson()))
+            put("activeProfileResolution", JSObject.fromJSONObject(recalc.resolution.toJson()))
+            put("message", if (deleted) "Deleted \"${existing?.name ?: id}\". ${recalc.resolution.message}" else "Profile not found.")
+        })
+    }
+
+    @PluginMethod
+    fun toggleProfileEnabled(call: PluginCall) {
+        val id = call.getString("id")
+        val enabled = call.getBoolean("enabled")
+        if (id.isNullOrBlank() || enabled == null) {
+            call.reject("Missing required parameters: id, enabled.")
+            return
+        }
+        val existing = VolumeSchedulerStorage.getProfileById(context, id)
+        if (existing == null) {
+            call.reject("Profile not found: $id")
+            return
+        }
+
+        val updated = existing.copy(enabled = enabled)
+        VolumeSchedulerStorage.upsertProfile(context, updated)
+
+        if (!enabled) {
+            VolumeSchedulerStorage.appendLog(
+                context,
+                ExecutionLogEntry(
+                    id = UUID.randomUUID().toString(),
+                    timestamp = System.currentTimeMillis(),
+                    source = "ALARM_CANCELED",
+                    ruleId = updated.id,
+                    ruleName = updated.name,
+                    activeProfileName = "",
+                    scheduledTime = "${updated.startTime}-${updated.endTime}",
+                    stream = "system",
+                    requestedPercentage = 0,
+                    indexBefore = 0,
+                    actualIndex = 0,
+                    maxIndex = 0,
+                    actualPercentage = 0,
+                    success = true,
+                    failureReason = "",
+                    message = "Profile \"${updated.name}\" disabled."
+                )
+            )
+        }
+
+        val recalc = VolumeAlarmManager.recalculateProfilesAndSchedule(
+            context = context,
+            activateIfCoversNow = true,
+            forceApplyActiveIfChanged = false,
+            source = "IMMEDIATE_PROFILE"
+        )
+        val saved = VolumeSchedulerStorage.getProfileById(context, id) ?: updated
+        val actionPrefix = if (enabled) "Enabled \"${saved.name}\"" else "Disabled \"${saved.name}\""
+        val msg = buildProfileActionMessage(actionPrefix, recalc)
+
+        call.resolve(JSObject().apply {
+            put("success", true)
+            put("profile", JSObject.fromJSONObject(saved.toJson()))
+            put("executedImmediately", recalc.executedImmediately)
+            put("mode", recalc.dispatch.mode)
+            put("profileOverlap", JSObject.fromJSONObject(recalc.overlapReport.toJson()))
+            put("activeProfileResolution", JSObject.fromJSONObject(recalc.resolution.toJson()))
+            put("message", msg)
+        })
+    }
+
+    @PluginMethod
+    fun setDefaultProfile(call: PluginCall) {
+        val profileId = call.getString("profileId")?.takeIf { it.isNotBlank() }
+        if (profileId != null && VolumeSchedulerStorage.getProfileById(context, profileId) == null) {
+            call.reject("Profile not found: $profileId")
+            return
+        }
+        VolumeSchedulerStorage.setDefaultProfileId(context, profileId)
+        val recalc = VolumeAlarmManager.recalculateProfilesAndSchedule(
+            context = context,
+            activateIfCoversNow = true,
+            forceApplyActiveIfChanged = false,
+            source = "PROFILE_FALLBACK"
+        )
+        val label = profileId?.let { VolumeSchedulerStorage.getProfileById(context, it)?.name }
+        call.resolve(JSObject().apply {
+            put("success", true)
+            if (profileId != null) {
+                put("defaultProfileId", profileId)
+            } else {
+                put("defaultProfileId", JSONObject.NULL)
+            }
+            put("activeProfileResolution", JSObject.fromJSONObject(recalc.resolution.toJson()))
+            put(
+                "message",
+                if (label != null) {
+                    "Fallback default profile set to \"$label\"."
+                } else {
+                    "Fallback default cleared. System volume stays unchanged outside timed profiles."
+                }
+            )
+        })
+    }
+
+    @PluginMethod
     fun enableScheduler(call: PluginCall) {
         VolumeSchedulerStorage.setSchedulerEnabled(context, true)
         val (scheduledCount, allExact) = VolumeAlarmManager.rescheduleAll(context)
+        val recalc = VolumeAlarmManager.recalculateProfilesAndSchedule(
+            context = context,
+            activateIfCoversNow = true,
+            forceApplyActiveIfChanged = true,
+            source = "IMMEDIATE_PROFILE"
+        )
         val schedules = VolumeSchedulerStorage.getSchedules(context)
         val arr = JSArray()
         schedules.forEach { arr.put(it.toJson()) }
@@ -357,12 +620,13 @@ class VolumeSchedulerPlugin : Plugin() {
             put("scheduledCount", scheduledCount)
             put("exactMode", allExact)
             put("schedules", arr)
+            put("activeProfileResolution", JSObject.fromJSONObject(recalc.resolution.toJson()))
             put(
                 "message",
                 if (allExact) {
-                    "Scheduler enabled. $scheduledCount active rule(s) queued with exact AlarmManager timing."
+                    "Scheduler enabled. $scheduledCount active alarm(s) queued with exact timing. ${recalc.resolution.message}"
                 } else {
-                    "Scheduler enabled. $scheduledCount active rule(s) queued using inexact fallback (grant Exact Alarm permission for minute-accurate timing)."
+                    "Scheduler enabled. $scheduledCount active alarm(s) queued using inexact fallback. ${recalc.resolution.message}"
                 }
             )
         })
@@ -372,6 +636,7 @@ class VolumeSchedulerPlugin : Plugin() {
     fun disableScheduler(call: PluginCall) {
         VolumeSchedulerStorage.setSchedulerEnabled(context, false)
         VolumeAlarmManager.cancelAll(context)
+        VolumeSchedulerStorage.setRuntimeActiveProfileId(context, null)
         val updated = VolumeSchedulerStorage.getSchedules(context).map {
             it.copy(nextTriggerAt = 0L)
         }
@@ -380,7 +645,7 @@ class VolumeSchedulerPlugin : Plugin() {
         call.resolve(JSObject().apply {
             put("success", true)
             put("schedulerEnabled", false)
-            put("message", "Scheduler disabled. All pending native alarms canceled.")
+            put("message", "Scheduler disabled. All pending native alarms and profile transitions canceled.")
         })
     }
 
@@ -661,6 +926,14 @@ class VolumeSchedulerPlugin : Plugin() {
         val lastTest = VolumeSchedulerStorage.getLastTestAlarmResult(context)
         val (aliased, aliasedNote) = VolumeSchedulerStorage.getStreamsAliasedInfo(context)
 
+        val profiles = VolumeSchedulerStorage.getProfiles(context)
+        val profilesArr = JSArray()
+        profiles.forEach { profilesArr.put(it.toJson()) }
+        val overlapReport = VolumeProfileManager.detectOverlaps(profiles)
+        val resolution = VolumeProfileManager.resolveProfileAt(context)
+        val defaultProfileId = VolumeSchedulerStorage.getDefaultProfileId(context)
+        val nextProfileTransitionAt = VolumeSchedulerStorage.getNextProfileTransitionAt(context)
+
         return JSObject().apply {
             put("native", true)
             put("streams", streams)
@@ -672,6 +945,15 @@ class VolumeSchedulerPlugin : Plugin() {
             put("streamsAliasedNote", aliasedNote)
             put("schedulerEnabled", schedulerEnabled)
             put("schedules", schedulesArr)
+            put("profiles", profilesArr)
+            if (defaultProfileId != null) {
+                put("defaultProfileId", defaultProfileId)
+            } else {
+                put("defaultProfileId", JSONObject.NULL)
+            }
+            put("profileOverlap", JSObject.fromJSONObject(overlapReport.toJson()))
+            put("activeProfileResolution", JSObject.fromJSONObject(resolution.toJson()))
+            put("nextProfileTransitionAt", nextProfileTransitionAt)
             if (next != null) {
                 put("nextScheduledChange", JSObject.fromJSONObject(next.toJson()))
             } else {
@@ -691,6 +973,21 @@ class VolumeSchedulerPlugin : Plugin() {
                 put("sdkInt", Build.VERSION.SDK_INT)
             })
         }
+    }
+
+    private fun buildProfileActionMessage(prefix: String, recalc: ProfileRecalcResult): String {
+        val parts = mutableListOf(prefix)
+        if (recalc.executedImmediately && recalc.executionOutcome != null) {
+            parts.add("Activated immediately (${recalc.executionOutcome.summaryMessage}).")
+        } else if (recalc.resolution.status == "conflict") {
+            parts.add(recalc.resolution.message)
+        } else {
+            parts.add(recalc.resolution.message)
+        }
+        if (recalc.dispatch.scheduled) {
+            parts.add(recalc.dispatch.message)
+        }
+        return parts.joinToString(" ")
     }
 
     private fun buildPermissionStatusObject(): JSObject {

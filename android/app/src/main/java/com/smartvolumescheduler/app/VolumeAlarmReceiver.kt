@@ -114,6 +114,48 @@ class VolumeAlarmReceiver : BroadcastReceiver() {
                 return
             }
 
+            val isProfileTransition = intent.action == VolumeAlarmManager.ACTION_EXECUTE_PROFILE_TRANSITION ||
+                intent.getBooleanExtra(VolumeAlarmManager.EXTRA_IS_PROFILE_TRANSITION, false)
+
+            if (isProfileTransition) {
+                if (!VolumeSchedulerStorage.isSchedulerEnabled(context)) {
+                    VolumeAlarmManager.cancelProfileTransition(context)
+                    VolumeSchedulerStorage.appendLog(
+                        context,
+                        ExecutionLogEntry(
+                            id = UUID.randomUUID().toString(),
+                            timestamp = System.currentTimeMillis(),
+                            source = "PROFILE_SKIPPED",
+                            ruleId = "",
+                            ruleName = "Profile Transition",
+                            activeProfileName = "",
+                            scheduledTime = "",
+                            stream = "none",
+                            requestedPercentage = 0,
+                            indexBefore = 0,
+                            actualIndex = 0,
+                            maxIndex = 0,
+                            actualPercentage = 0,
+                            success = false,
+                            failureReason = "Master scheduler disabled when profile transition fired.",
+                            message = "Profile transition skipped because master scheduler is paused."
+                        )
+                    )
+                    completeAsync()
+                    return
+                }
+
+                VolumeAlarmManager.recalculateProfilesAndSchedule(
+                    context = context,
+                    activateIfCoversNow = true,
+                    forceApplyActiveIfChanged = false,
+                    source = "PROFILE_SCHEDULE"
+                )
+                notifyForegroundUi(context)
+                completeAsync()
+                return
+            }
+
             val scheduleId = intent.getStringExtra(VolumeAlarmManager.EXTRA_SCHEDULE_ID)
             if (scheduleId.isNullOrBlank()) {
                 VolumeSchedulerStorage.appendLog(

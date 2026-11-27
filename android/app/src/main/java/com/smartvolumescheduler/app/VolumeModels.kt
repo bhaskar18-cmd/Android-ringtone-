@@ -153,6 +153,86 @@ data class VolumeSchedule(
     }
 }
 
+data class VolumeProfile(
+    val id: String,
+    val name: String,
+    val icon: String = "sun",
+    val startTime: String, // 24h HH:mm
+    val endTime: String,   // 24h HH:mm
+    val streams: Map<String, StreamRuleConfig>,
+    val enabled: Boolean = true,
+    val priority: Int = 0,
+    val nextTransitionAt: Long = 0L,
+    val lastActivatedAt: Long = 0L,
+    val lastActivatedSlotMillis: Long = 0L,
+    val lastExecutionSuccess: Boolean = true,
+    val lastExecutionMessage: String = ""
+) {
+    fun toJson(): JSONObject {
+        val obj = JSONObject()
+        obj.put("id", id)
+        obj.put("name", name)
+        obj.put("icon", icon)
+        obj.put("startTime", startTime)
+        obj.put("endTime", endTime)
+
+        val streamsObj = JSONObject()
+        AudioStreamType.entries.forEach { st ->
+            val cfg = streams[st.key] ?: StreamRuleConfig(true, 70)
+            streamsObj.put(st.key, cfg.toJson())
+        }
+        obj.put("streams", streamsObj)
+
+        obj.put("enabled", enabled)
+        obj.put("priority", priority)
+        obj.put("nextTransitionAt", nextTransitionAt)
+        obj.put("lastActivatedAt", lastActivatedAt)
+        obj.put("lastActivatedSlotMillis", lastActivatedSlotMillis)
+        obj.put("lastExecutionSuccess", lastExecutionSuccess)
+        obj.put("lastExecutionMessage", lastExecutionMessage)
+        return obj
+    }
+
+    companion object {
+        fun defaultStreams(
+            overrides: Map<String, StreamRuleConfig> = emptyMap()
+        ): Map<String, StreamRuleConfig> {
+            val result = linkedMapOf<String, StreamRuleConfig>()
+            AudioStreamType.entries.forEach { st ->
+                result[st.key] = overrides[st.key] ?: StreamRuleConfig(true, 70)
+            }
+            return result
+        }
+
+        fun fromJson(obj: JSONObject): VolumeProfile {
+            val streamsObj = obj.optJSONObject("streams")
+            val parsedStreams = linkedMapOf<String, StreamRuleConfig>()
+            AudioStreamType.entries.forEach { st ->
+                parsedStreams[st.key] = StreamRuleConfig.fromJson(
+                    streamsObj?.optJSONObject(st.key),
+                    defaultEnabled = true,
+                    defaultPct = 70
+                )
+            }
+            return VolumeProfile(
+                id = obj.optString("id"),
+                name = obj.optString("name", "Profile"),
+                icon = obj.optString("icon", "sun").ifBlank { "sun" },
+                startTime = obj.optString("startTime", "06:00"),
+                endTime = obj.optString("endTime", "20:00"),
+                streams = parsedStreams,
+                enabled = obj.optBoolean("enabled", true),
+                priority = obj.optInt("priority", 0),
+                nextTransitionAt = obj.optLong("nextTransitionAt", 0L),
+                lastActivatedAt = obj.optLong("lastActivatedAt", 0L),
+                lastActivatedSlotMillis = obj.optLong("lastActivatedSlotMillis", 0L),
+                lastExecutionSuccess = obj.optBoolean("lastExecutionSuccess", true),
+                lastExecutionMessage = obj.optString("lastExecutionMessage", "")
+            )
+        }
+    }
+}
+
 data class VolumeApplyResult(
     val success: Boolean,
     val appliedExactTarget: Boolean,
@@ -314,9 +394,10 @@ data class StreamTestResult(
 data class ExecutionLogEntry(
     val id: String,
     val timestamp: Long,
-    val source: String, // SCHEDULE | IMMEDIATE_PAST_TIME | BACKGROUND_TEST_ALARM | FOREGROUND_TEST | MANUAL | BOOT_RESTORE | ALARM_CANCELED | RULE_SKIPPED
+    val source: String, // PROFILE_SCHEDULE | IMMEDIATE_PROFILE | BOOT_PROFILE_RESTORE | PROFILE_FALLBACK | PROFILE_CONFLICT_SKIPPED | SCHEDULE | IMMEDIATE_PAST_TIME | BACKGROUND_TEST_ALARM | FOREGROUND_TEST | MANUAL | BOOT_RESTORE | ALARM_CANCELED | RULE_SKIPPED
     val ruleId: String,
     val ruleName: String,
+    val activeProfileName: String = "",
     val scheduledTime: String,
     val stream: String,
     val requestedPercentage: Int,
@@ -340,6 +421,7 @@ data class ExecutionLogEntry(
             put("ruleId", ruleId)
             put("scheduleId", ruleId)
             put("ruleName", ruleName)
+            put("activeProfileName", activeProfileName)
             put("scheduledTime", scheduledTime)
             put("stream", stream)
             put("requestedPercentage", requestedPercentage)
@@ -371,6 +453,7 @@ data class ExecutionLogEntry(
                 source = obj.optString("source", "MANUAL"),
                 ruleId = obj.optString("ruleId", obj.optString("scheduleId", "")),
                 ruleName = obj.optString("ruleName", ""),
+                activeProfileName = obj.optString("activeProfileName", ""),
                 scheduledTime = obj.optString("scheduledTime", ""),
                 stream = obj.optString("stream", ""),
                 requestedPercentage = obj.optInt("requestedPercentage", 0),

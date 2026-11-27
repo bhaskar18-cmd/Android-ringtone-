@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  AlertTriangle,
   Bell,
   Clock,
   Moon,
@@ -21,10 +22,11 @@ import {
   STREAM_OPTIONS,
   formatRuleStreamsSummary,
   formatTime12h,
+  formatTimeRange12h,
   formatTimestamp,
   formatTriggerRelative,
-  inferActiveProfileName,
 } from '../utils/formatters';
+import { ProfileIcon } from './ProfileIcon';
 
 interface DashboardTabProps {
   settings: VolumeSettingsResponse;
@@ -56,10 +58,35 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     settings.streams.ringtone?.percentage ?? 80
   );
 
-  const activeProfile = inferActiveProfileName(
-    settings.schedules,
-    settings.schedulerEnabled
-  );
+  const resolution = settings.activeProfileResolution;
+  const activeProfile = resolution?.activeProfile ?? null;
+  const profiles = settings.profiles ?? [];
+  const nextProfileTransitionAt = settings.nextProfileTransitionAt ?? 0;
+
+  const activeHeading = !settings.schedulerEnabled || resolution?.status === 'paused'
+    ? 'Scheduler Paused'
+    : resolution?.status === 'conflict'
+      ? 'Conflict: Overlapping Profiles'
+      : activeProfile
+        ? resolution?.isFallback
+          ? `${activeProfile.name} (Fallback)`
+          : activeProfile.name
+        : 'No profile active';
+
+  const nextStartingProfile = (() => {
+    if (!settings.schedulerEnabled || profiles.length === 0) return null;
+    const queued = profiles
+      .filter((p) => p.enabled && p.nextTransitionAt > 0)
+      .sort((a, b) => a.nextTransitionAt - b.nextTransitionAt);
+    return queued[0] ?? null;
+  })();
+
+  const useProfileTransitionCard =
+    settings.schedulerEnabled &&
+    nextProfileTransitionAt > 0 &&
+    (!settings.nextScheduledChange ||
+      settings.nextScheduledChange.nextTriggerAt <= 0 ||
+      nextProfileTransitionAt <= settings.nextScheduledChange.nextTriggerAt);
 
   const handleStreamSelect = (stream: AudioStreamKey) => {
     setSelectedStream(stream);
@@ -82,14 +109,28 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="lg:col-span-7 bg-[#121A26] border border-slate-800/90 rounded-2xl p-5 flex flex-col justify-between gap-4">
           <div className="flex items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-medium text-slate-400">
-                Last Active Schedule Profile
+                Active Volume Profile
               </p>
-              <h2 className="text-xl font-semibold text-slate-100 mt-1 leading-snug">
-                {activeProfile}
-              </h2>
-              <p className="text-xs text-slate-400 mt-1.5">
+              <div className="flex items-center gap-2.5 mt-1">
+                {activeProfile && (
+                  <ProfileIcon icon={activeProfile.icon} className="w-5 h-5 text-cyan-400 shrink-0" />
+                )}
+                <h2
+                  className={`text-xl font-semibold leading-snug truncate ${
+                    resolution?.status === 'conflict' ? 'text-rose-300' : 'text-slate-100'
+                  }`}
+                >
+                  {activeHeading}
+                </h2>
+              </div>
+              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                {activeProfile
+                  ? `${formatTimeRange12h(activeProfile.startTime, activeProfile.endTime)} · `
+                  : resolution?.status === 'conflict'
+                    ? `${resolution.message} · `
+                    : 'Current system volume stays unchanged · '}
                 {settings.native
                   ? `${settings.deviceInfo?.manufacturer ?? 'Android'} ${settings.deviceInfo?.model ?? ''} · Android ${settings.deviceInfo?.androidVersion ?? ''} · Ringer: ${settings.ringerMode}`
                   : 'Web Preview · Connect Android APK for live AudioManager telemetry'}
@@ -150,9 +191,32 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-medium text-slate-400">
-                Next Scheduled Change
+                Next Scheduled Transition
               </p>
-              {settings.nextScheduledChange ? (
+              {useProfileTransitionCard ? (
+                <>
+                  <div className="flex items-baseline gap-2.5 mt-1 flex-wrap">
+                    <span className="text-2xl font-bold font-mono-tabular text-slate-100">
+                      {new Date(nextProfileTransitionAt).toLocaleTimeString([], {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    <span className="text-sm font-medium text-cyan-300 truncate">
+                      {nextStartingProfile &&
+                      Math.abs(nextStartingProfile.nextTransitionAt - nextProfileTransitionAt) < 60000
+                        ? nextStartingProfile.name
+                        : 'Profile window ends'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                    {nextStartingProfile &&
+                    Math.abs(nextStartingProfile.nextTransitionAt - nextProfileTransitionAt) < 60000
+                      ? formatRuleStreamsSummary(nextStartingProfile.streams)
+                      : 'Transitions out of active profile window.'}
+                  </p>
+                </>
+              ) : settings.nextScheduledChange ? (
                 <>
                   <div className="flex items-baseline gap-2.5 mt-1">
                     <span className="text-2xl font-bold font-mono-tabular text-slate-100">
@@ -171,11 +235,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               ) : (
                 <div className="mt-1.5">
                   <p className="text-base font-semibold text-slate-200">
-                    No active alarm queued
+                    No active transition queued
                   </p>
                   <p className="text-xs text-slate-400 mt-1">
                     {settings.schedulerEnabled
-                      ? 'Enable or add a schedule rule to queue an alarm.'
+                      ? 'Enable a profile or rule to queue an alarm.'
                       : 'Enable the scheduler to resume automatic triggers.'}
                   </p>
                 </div>
@@ -186,20 +250,46 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
           <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs">
             <span className="text-slate-400 font-mono-tabular">
-              {settings.nextScheduledChange
-                ? formatTriggerRelative(settings.nextScheduledChange.nextTriggerAt)
-                : `Last boot sync: ${formatTimestamp(settings.bootRestore.lastBootRestoreAt)}`}
+              {useProfileTransitionCard
+                ? formatTriggerRelative(nextProfileTransitionAt)
+                : settings.nextScheduledChange
+                  ? formatTriggerRelative(settings.nextScheduledChange.nextTriggerAt)
+                  : `Last boot sync: ${formatTimestamp(settings.bootRestore.lastBootRestoreAt)}`}
             </span>
             <button
               type="button"
               onClick={onGoToSchedules}
               className="text-cyan-400 hover:text-cyan-300 font-medium py-1.5 px-2 whitespace-nowrap shrink-0"
             >
-              Manage rules
+              Manage profiles
             </button>
           </div>
         </div>
       </section>
+
+      {settings.profileOverlap?.hasAmbiguousOverlap && (
+        <div className="bg-rose-500/10 border border-rose-500/40 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 text-xs text-rose-200">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-sm text-rose-100">
+                Overlapping Volume Profiles Conflict
+              </p>
+              <p className="mt-0.5 leading-relaxed">
+                {settings.profileOverlap.warnings[0] ??
+                  'Two enabled profiles overlap with equal priority. Open Profiles to resolve.'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onGoToSchedules}
+            className="min-h-[44px] px-4 py-2 rounded-xl bg-rose-500/20 border border-rose-400/40 text-rose-100 text-xs font-semibold hover:bg-rose-500/30 transition-colors whitespace-nowrap shrink-0"
+          >
+            Resolve Overlap
+          </button>
+        </div>
+      )}
 
       {/* Permission Alert Banner when native permissions need attention */}
       {missingCritical && (

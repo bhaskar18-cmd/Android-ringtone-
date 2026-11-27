@@ -9,20 +9,23 @@ import {
 } from 'lucide-react';
 import { DashboardTab } from './components/DashboardTab';
 import { PermissionsTab } from './components/PermissionsTab';
+import { ProfileFormSheet } from './components/ProfileFormSheet';
+import { ProfilesTab } from './components/ProfilesTab';
 import { ScheduleFormSheet } from './components/ScheduleFormSheet';
-import { SchedulesTab } from './components/SchedulesTab';
 import { TestingTab } from './components/TestingTab';
 import { volumeScheduler } from './native/volumeScheduler';
 import type {
   AudioStreamKey,
   PermissionActionType,
   PermissionStatusResponse,
+  SaveVolumeProfileParams,
   ScheduleVolumeChangeParams,
+  VolumeProfile,
   VolumeSchedule,
   VolumeSettingsResponse,
 } from './types/volume';
 
-type AppTab = 'dashboard' | 'schedules' | 'testing' | 'permissions';
+type AppTab = 'dashboard' | 'profiles' | 'testing' | 'permissions';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
@@ -31,12 +34,17 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [busyScheduleId, setBusyScheduleId] = useState<string | null>(null);
+  const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const [permMessage, setPermMessage] = useState<string | null>(null);
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<VolumeSchedule | null>(null);
   const [savingSchedule, setSavingSchedule] = useState(false);
+
+  const [profileSheetOpen, setProfileSheetOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<VolumeProfile | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
 
   const loadAll = useCallback(async (showSpinner = false) => {
     if (showSpinner) setBusyAction('refresh');
@@ -174,6 +182,52 @@ export default function App() {
     }
   };
 
+  const handleSaveProfile = async (params: SaveVolumeProfileParams) => {
+    setSavingProfile(true);
+    try {
+      const res = await volumeScheduler.saveVolumeProfile(params);
+      setFeedback({ ok: res.success, text: res.message });
+      setProfileSheetOpen(false);
+      setEditingProfile(null);
+      await loadAll();
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleDeleteProfile = async (id: string) => {
+    setBusyProfileId(id);
+    try {
+      const res = await volumeScheduler.deleteVolumeProfile(id);
+      setFeedback({ ok: res.success, text: res.message });
+      await loadAll();
+    } finally {
+      setBusyProfileId(null);
+    }
+  };
+
+  const handleToggleProfile = async (id: string, enabled: boolean) => {
+    setBusyProfileId(id);
+    try {
+      const res = await volumeScheduler.toggleProfileEnabled(id, enabled);
+      setFeedback({ ok: res.success, text: res.message });
+      await loadAll();
+    } finally {
+      setBusyProfileId(null);
+    }
+  };
+
+  const handleChangeDefaultProfile = async (profileId: string | null) => {
+    setBusyAction('default-profile');
+    try {
+      const res = await volumeScheduler.setDefaultProfile(profileId);
+      setFeedback({ ok: res.success, text: res.message });
+      await loadAll();
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const handleRequestPermission = async (type: PermissionActionType) => {
     setBusyAction(`perm-${type}`);
     try {
@@ -205,7 +259,7 @@ export default function App() {
     icon: React.ComponentType<{ className?: string }>;
   }> = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
-    { id: 'schedules', label: 'Schedules', icon: CalendarClock },
+    { id: 'profiles', label: 'Profiles', icon: CalendarClock },
     { id: 'testing', label: 'Testing', icon: FlaskConical },
     { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   ];
@@ -248,13 +302,13 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setEditingSchedule(null);
-              setSheetOpen(true);
+              setEditingProfile(null);
+              setProfileSheetOpen(true);
             }}
             className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-cyan-400 text-[#0B111A] text-xs font-semibold hover:bg-cyan-300 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Rule</span>
+            <span>Add Profile</span>
           </button>
         </div>
       </header>
@@ -290,26 +344,44 @@ export default function App() {
                 onApplyVolume={handleApplyVolume}
                 onApplyPreset={handleApplyPreset}
                 onToggleScheduler={handleToggleScheduler}
-                onGoToSchedules={() => setActiveTab('schedules')}
+                onGoToSchedules={() => setActiveTab('profiles')}
                 onGoToPermissions={() => setActiveTab('permissions')}
               />
             )}
 
-            {activeTab === 'schedules' && (
-              <SchedulesTab
-                schedules={settings.schedules}
+            {activeTab === 'profiles' && (
+              <ProfilesTab
+                profiles={settings.profiles ?? []}
+                defaultProfileId={settings.defaultProfileId ?? null}
+                profileOverlap={settings.profileOverlap}
+                activeResolution={settings.activeProfileResolution}
+                nextTransitionAt={settings.nextProfileTransitionAt ?? 0}
                 schedulerEnabled={settings.schedulerEnabled}
-                busyId={busyScheduleId}
-                onAdd={() => {
+                busyProfileId={busyProfileId}
+                schedules={settings.schedules}
+                busyScheduleId={busyScheduleId}
+                lastFeedback={feedback}
+                onAddProfile={() => {
+                  setEditingProfile(null);
+                  setProfileSheetOpen(true);
+                }}
+                onEditProfile={(prof) => {
+                  setEditingProfile(prof);
+                  setProfileSheetOpen(true);
+                }}
+                onDeleteProfile={handleDeleteProfile}
+                onToggleProfile={handleToggleProfile}
+                onChangeDefaultProfile={handleChangeDefaultProfile}
+                onAddSchedule={() => {
                   setEditingSchedule(null);
                   setSheetOpen(true);
                 }}
-                onEdit={(sched) => {
+                onEditSchedule={(sched) => {
                   setEditingSchedule(sched);
                   setSheetOpen(true);
                 }}
-                onDelete={handleDeleteSchedule}
-                onToggleRule={handleToggleRule}
+                onDeleteSchedule={handleDeleteSchedule}
+                onToggleSchedule={handleToggleRule}
               />
             )}
 
@@ -374,6 +446,18 @@ export default function App() {
           })}
         </div>
       </nav>
+
+      <ProfileFormSheet
+        open={profileSheetOpen}
+        initialProfile={editingProfile}
+        existingProfiles={settings?.profiles ?? []}
+        saving={savingProfile}
+        onClose={() => {
+          setProfileSheetOpen(false);
+          setEditingProfile(null);
+        }}
+        onSave={handleSaveProfile}
+      />
 
       <ScheduleFormSheet
         open={sheetOpen}

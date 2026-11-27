@@ -21,6 +21,49 @@ export interface StreamRuleConfig {
 
 export type RuleStreamsMap = Record<AudioStreamKey, StreamRuleConfig>;
 
+export type ProfileIconKey =
+  | 'sun'
+  | 'moon'
+  | 'briefcase'
+  | 'home'
+  | 'car'
+  | 'bell'
+  | 'volume'
+  | 'shield';
+
+export interface VolumeProfile {
+  id: string;
+  name: string;
+  icon: ProfileIconKey | string;
+  startTime: string; // 24-hour local HH:mm
+  endTime: string; // 24-hour local HH:mm
+  streams: RuleStreamsMap;
+  enabled: boolean;
+  priority: number;
+  nextTransitionAt: number;
+  lastActivatedAt: number;
+  lastActivatedSlotMillis?: number;
+  lastExecutionSuccess: boolean;
+  lastExecutionMessage: string;
+}
+
+export interface ProfileOverlapReport {
+  hasAnyOverlap: boolean;
+  hasAmbiguousOverlap: boolean;
+  overlappingProfileIds: string[];
+  ambiguousProfileIds: string[];
+  warnings: string[];
+}
+
+export interface ProfileResolution {
+  status: 'active' | 'fallback' | 'none' | 'conflict' | 'paused' | string;
+  activeProfile: VolumeProfile | null;
+  isFallback: boolean;
+  conflictingProfiles: VolumeProfile[];
+  activeSlotMillis: number;
+  message: string;
+}
+
 export interface VolumeSchedule {
   id: string;
   label: string;
@@ -58,6 +101,12 @@ export interface ExecutionLogEntry {
   id: string;
   timestamp: number;
   source:
+    | 'PROFILE_SCHEDULE'
+    | 'IMMEDIATE_PROFILE'
+    | 'BOOT_PROFILE_RESTORE'
+    | 'PROFILE_FALLBACK'
+    | 'PROFILE_CONFLICT_SKIPPED'
+    | 'PROFILE_SKIPPED'
     | 'SCHEDULE'
     | 'IMMEDIATE_PAST_TIME'
     | 'BACKGROUND_TEST_ALARM'
@@ -71,6 +120,7 @@ export interface ExecutionLogEntry {
   ruleId?: string;
   scheduleId: string;
   ruleName?: string;
+  activeProfileName?: string;
   scheduledTime?: string;
   stream: string;
   requestedPercentage: number;
@@ -126,6 +176,11 @@ export interface VolumeSettingsResponse {
   streamsAliasedNote?: string;
   schedulerEnabled: boolean;
   schedules: VolumeSchedule[];
+  profiles?: VolumeProfile[];
+  defaultProfileId?: string | null;
+  profileOverlap?: ProfileOverlapReport;
+  activeProfileResolution?: ProfileResolution;
+  nextProfileTransitionAt?: number;
   nextScheduledChange: VolumeSchedule | null;
   bootRestore: BootRestoreInfo;
   recentLogs: ExecutionLogEntry[];
@@ -168,6 +223,63 @@ export interface ScheduleVolumeChangeResponse {
   mode: 'exact' | 'inexact_fallback' | 'disabled' | 'web_preview';
   executedImmediately?: boolean;
   message: string;
+}
+
+export interface SaveVolumeProfileParams {
+  id?: string;
+  name: string;
+  icon: ProfileIconKey | string;
+  startTime: string;
+  endTime: string;
+  streams: RuleStreamsMap;
+  enabled: boolean;
+  priority: number;
+}
+
+export interface SaveVolumeProfileResponse {
+  success: boolean;
+  profile: VolumeProfile;
+  executedImmediately?: boolean;
+  mode: string;
+  profileOverlap: ProfileOverlapReport;
+  activeProfileResolution: ProfileResolution;
+  nextProfileTransitionAt: number;
+  message: string;
+}
+
+export interface DeleteVolumeProfileResponse {
+  success: boolean;
+  deletedId: string;
+  profiles: VolumeProfile[];
+  profileOverlap: ProfileOverlapReport;
+  activeProfileResolution: ProfileResolution;
+  message: string;
+}
+
+export interface ToggleProfileResponse {
+  success: boolean;
+  profile: VolumeProfile;
+  executedImmediately?: boolean;
+  mode: string;
+  profileOverlap: ProfileOverlapReport;
+  activeProfileResolution: ProfileResolution;
+  message: string;
+}
+
+export interface SetDefaultProfileResponse {
+  success: boolean;
+  defaultProfileId: string | null;
+  activeProfileResolution: ProfileResolution;
+  message: string;
+}
+
+export interface GetVolumeProfilesResponse {
+  schedulerEnabled: boolean;
+  profiles: VolumeProfile[];
+  defaultProfileId: string | null;
+  profileOverlap: ProfileOverlapReport;
+  activeProfileResolution: ProfileResolution;
+  nextProfileTransitionAt: number;
 }
 
 export interface GetScheduledChangesResponse {
@@ -265,6 +377,14 @@ export interface VolumeSchedulerPluginInterface {
     executedImmediately?: boolean;
     message: string;
   }>;
+  getVolumeProfiles(): Promise<GetVolumeProfilesResponse>;
+  saveVolumeProfile(options: SaveVolumeProfileParams): Promise<SaveVolumeProfileResponse>;
+  deleteVolumeProfile(options: { id: string }): Promise<DeleteVolumeProfileResponse>;
+  toggleProfileEnabled(options: {
+    id: string;
+    enabled: boolean;
+  }): Promise<ToggleProfileResponse>;
+  setDefaultProfile(options: { profileId: string | null }): Promise<SetDefaultProfileResponse>;
   enableScheduler(): Promise<SchedulerToggleResponse>;
   disableScheduler(): Promise<SchedulerToggleResponse>;
   requestRequiredPermissions(options?: {

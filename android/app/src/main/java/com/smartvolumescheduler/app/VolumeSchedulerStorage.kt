@@ -15,6 +15,12 @@ object VolumeSchedulerStorage {
     private const val KEY_LAST_TEST_RESULT = "last_test_alarm_result_json"
     private const val KEY_STREAMS_ALIASED = "streams_aliased_detected"
     private const val KEY_STREAMS_ALIASED_NOTE = "streams_aliased_note"
+    private const val KEY_PROFILES = "volume_profiles_json"
+    private const val KEY_PROFILES_INITIALIZED = "profiles_initialized_v1"
+    private const val KEY_DEFAULT_PROFILE_ID = "default_fallback_profile_id"
+    private const val KEY_ACTIVE_PROFILE_ID = "runtime_active_profile_id"
+    private const val KEY_LAST_APPLIED_PROFILE_KEY = "last_applied_profile_slot_key"
+    private const val KEY_NEXT_PROFILE_TRANSITION_AT = "next_profile_transition_at"
     private const val KEY_LAST_BOOT_AT = "last_boot_restore_at"
     private const val KEY_LAST_BOOT_REASON = "last_boot_restore_reason"
     private const val KEY_LAST_BOOT_COUNT = "last_boot_restored_count"
@@ -27,43 +33,56 @@ object VolumeSchedulerStorage {
     @Synchronized
     fun ensureDefaults(context: Context) {
         val p = prefs(context)
-        if (p.getBoolean(KEY_INITIALIZED, false)) {
-            return
+        if (!p.getBoolean(KEY_INITIALIZED, false)) {
+            saveSchedulesInternal(p, emptyList())
+            p.edit()
+                .putBoolean(KEY_SCHEDULER_ENABLED, true)
+                .putBoolean(KEY_INITIALIZED, true)
+                .commit()
         }
 
-        val allDays = listOf(0, 1, 2, 3, 4, 5, 6)
-        val daySchedule = VolumeSchedule(
-            id = "default-day-0800",
-            label = "Day Mode",
-            time = "08:00",
-            streams = VolumeSchedule.defaultStreams(
-                mapOf(
-                    AudioStreamType.RINGTONE.key to StreamRuleConfig(true, 100),
-                    AudioStreamType.NOTIFICATION.key to StreamRuleConfig(true, 100)
-                )
-            ),
-            days = allDays,
-            enabled = true
-        )
-        val nightSchedule = VolumeSchedule(
-            id = "default-night-2000",
-            label = "Night Mode",
-            time = "20:00",
-            streams = VolumeSchedule.defaultStreams(
-                mapOf(
-                    AudioStreamType.RINGTONE.key to StreamRuleConfig(true, 50),
-                    AudioStreamType.NOTIFICATION.key to StreamRuleConfig(true, 50)
-                )
-            ),
-            days = allDays,
-            enabled = true
-        )
-
-        saveSchedulesInternal(p, listOf(daySchedule, nightSchedule))
-        p.edit()
-            .putBoolean(KEY_SCHEDULER_ENABLED, true)
-            .putBoolean(KEY_INITIALIZED, true)
-            .commit()
+        if (!p.getBoolean(KEY_PROFILES_INITIALIZED, false)) {
+            val dayProfile = VolumeProfile(
+                id = "default-profile-day",
+                name = "Day Profile",
+                icon = "sun",
+                startTime = "06:00",
+                endTime = "20:00",
+                streams = VolumeProfile.defaultStreams(
+                    mapOf(
+                        AudioStreamType.MEDIA.key to StreamRuleConfig(true, 70),
+                        AudioStreamType.RINGTONE.key to StreamRuleConfig(true, 100),
+                        AudioStreamType.NOTIFICATION.key to StreamRuleConfig(true, 100),
+                        AudioStreamType.ALARM.key to StreamRuleConfig(true, 80),
+                        AudioStreamType.VOICE_CALL.key to StreamRuleConfig(true, 100)
+                    )
+                ),
+                enabled = true,
+                priority = 0
+            )
+            val nightProfile = VolumeProfile(
+                id = "default-profile-night",
+                name = "Night Profile",
+                icon = "moon",
+                startTime = "20:01",
+                endTime = "05:59",
+                streams = VolumeProfile.defaultStreams(
+                    mapOf(
+                        AudioStreamType.MEDIA.key to StreamRuleConfig(true, 30),
+                        AudioStreamType.RINGTONE.key to StreamRuleConfig(true, 50),
+                        AudioStreamType.NOTIFICATION.key to StreamRuleConfig(true, 50),
+                        AudioStreamType.ALARM.key to StreamRuleConfig(true, 50),
+                        AudioStreamType.VOICE_CALL.key to StreamRuleConfig(true, 50)
+                    )
+                ),
+                enabled = true,
+                priority = 0
+            )
+            saveProfilesInternal(p, listOf(dayProfile, nightProfile))
+            p.edit()
+                .putBoolean(KEY_PROFILES_INITIALIZED, true)
+                .commit()
+        }
     }
 
     @Synchronized
@@ -131,6 +150,119 @@ object VolumeSchedulerStorage {
         val deleted = filtered.size != current.size
         saveSchedules(context, filtered)
         return deleted to filtered
+    }
+
+    @Synchronized
+    fun getProfiles(context: Context): List<VolumeProfile> {
+        ensureDefaults(context)
+        val raw = prefs(context).getString(KEY_PROFILES, "[]") ?: "[]"
+        val list = mutableListOf<VolumeProfile>()
+        try {
+            val arr = JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                list.add(VolumeProfile.fromJson(obj))
+            }
+        } catch (_: Exception) {
+        }
+        return list.sortedWith(compareBy<VolumeProfile> { it.startTime }.thenBy { it.name })
+    }
+
+    @Synchronized
+    fun saveProfiles(context: Context, profiles: List<VolumeProfile>) {
+        ensureDefaults(context)
+        saveProfilesInternal(prefs(context), profiles)
+    }
+
+    private fun saveProfilesInternal(p: SharedPreferences, profiles: List<VolumeProfile>) {
+        val arr = JSONArray()
+        profiles.sortedWith(compareBy<VolumeProfile> { it.startTime }.thenBy { it.name })
+            .forEach { arr.put(it.toJson()) }
+        p.edit().putString(KEY_PROFILES, arr.toString()).commit()
+    }
+
+    @Synchronized
+    fun upsertProfile(context: Context, profile: VolumeProfile): List<VolumeProfile> {
+        val current = getProfiles(context).toMutableList()
+        val idx = current.indexOfFirst { it.id == profile.id }
+        if (idx >= 0) {
+            current[idx] = profile
+        } else {
+            current.add(profile)
+        }
+        saveProfiles(context, current)
+        return getProfiles(context)
+    }
+
+    @Synchronized
+    fun getProfileById(context: Context, id: String): VolumeProfile? {
+        return getProfiles(context).firstOrNull { it.id == id }
+    }
+
+    @Synchronized
+    fun deleteProfile(context: Context, id: String): Pair<Boolean, List<VolumeProfile>> {
+        val current = getProfiles(context)
+        val filtered = current.filterNot { it.id == id }
+        val deleted = filtered.size != current.size
+        saveProfiles(context, filtered)
+        if (getDefaultProfileId(context) == id) {
+            setDefaultProfileId(context, null)
+        }
+        return deleted to filtered
+    }
+
+    @Synchronized
+    fun getDefaultProfileId(context: Context): String? {
+        val v = prefs(context).getString(KEY_DEFAULT_PROFILE_ID, null)
+        return v?.takeIf { it.isNotBlank() }
+    }
+
+    @Synchronized
+    fun setDefaultProfileId(context: Context, profileId: String?) {
+        val editor = prefs(context).edit()
+        if (profileId.isNullOrBlank()) {
+            editor.remove(KEY_DEFAULT_PROFILE_ID)
+        } else {
+            editor.putString(KEY_DEFAULT_PROFILE_ID, profileId)
+        }
+        editor.commit()
+    }
+
+    @Synchronized
+    fun getRuntimeActiveProfileId(context: Context): String? {
+        val v = prefs(context).getString(KEY_ACTIVE_PROFILE_ID, null)
+        return v?.takeIf { it.isNotBlank() }
+    }
+
+    @Synchronized
+    fun setRuntimeActiveProfileId(context: Context, profileId: String?) {
+        val editor = prefs(context).edit()
+        if (profileId.isNullOrBlank()) {
+            editor.remove(KEY_ACTIVE_PROFILE_ID)
+        } else {
+            editor.putString(KEY_ACTIVE_PROFILE_ID, profileId)
+        }
+        editor.commit()
+    }
+
+    @Synchronized
+    fun getLastAppliedProfileKey(context: Context): String {
+        return prefs(context).getString(KEY_LAST_APPLIED_PROFILE_KEY, "") ?: ""
+    }
+
+    @Synchronized
+    fun setLastAppliedProfileKey(context: Context, key: String) {
+        prefs(context).edit().putString(KEY_LAST_APPLIED_PROFILE_KEY, key).commit()
+    }
+
+    @Synchronized
+    fun getNextProfileTransitionAt(context: Context): Long {
+        return prefs(context).getLong(KEY_NEXT_PROFILE_TRANSITION_AT, 0L)
+    }
+
+    @Synchronized
+    fun setNextProfileTransitionAt(context: Context, epochMs: Long) {
+        prefs(context).edit().putLong(KEY_NEXT_PROFILE_TRANSITION_AT, epochMs).commit()
     }
 
     @Synchronized
@@ -206,6 +338,7 @@ object VolumeSchedulerStorage {
                 source = "BOOT_RESTORE",
                 ruleId = "",
                 ruleName = "Boot & System Restore",
+                activeProfileName = "",
                 scheduledTime = "",
                 stream = "system",
                 requestedPercentage = 0,
@@ -215,7 +348,7 @@ object VolumeSchedulerStorage {
                 actualPercentage = 0,
                 success = true,
                 failureReason = "",
-                message = "Restored $restoredCount enabled schedule(s) on $reason."
+                message = "Restored $restoredCount enabled schedule/profile transition(s) on $reason."
             )
         )
     }

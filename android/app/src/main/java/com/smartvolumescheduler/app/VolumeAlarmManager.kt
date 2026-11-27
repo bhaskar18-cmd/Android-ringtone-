@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import java.util.Calendar
+import java.util.UUID
 
 data class AlarmDispatchResult(
     val scheduled: Boolean,
@@ -18,15 +19,26 @@ data class AlarmDispatchResult(
     val message: String
 )
 
+data class ProfileRecalcResult(
+    val resolution: ProfileResolution,
+    val overlapReport: ProfileOverlapReport,
+    val dispatch: AlarmDispatchResult,
+    val executedImmediately: Boolean,
+    val executionOutcome: ProfileExecutionOutcome?
+)
+
 object VolumeAlarmManager {
 
     const val ACTION_EXECUTE_SCHEDULE = "com.smartvolumescheduler.app.ACTION_EXECUTE_SCHEDULE"
     const val ACTION_EXECUTE_TEST_ALARM = "com.smartvolumescheduler.app.ACTION_EXECUTE_TEST_ALARM"
+    const val ACTION_EXECUTE_PROFILE_TRANSITION = "com.smartvolumescheduler.app.ACTION_EXECUTE_PROFILE_TRANSITION"
     const val EXTRA_SCHEDULE_ID = "extra_schedule_id"
     const val EXTRA_SLOT_MILLIS = "extra_slot_millis"
     const val EXTRA_IS_TEST = "extra_is_test"
+    const val EXTRA_IS_PROFILE_TRANSITION = "extra_is_profile_transition"
     const val EXTRA_TEST_STREAM = "extra_test_stream"
     const val EXTRA_TEST_PERCENTAGE = "extra_test_percentage"
+    private const val REQUEST_CODE_PROFILE_TRANSITION = 91001
 
     fun canScheduleExactAlarms(context: Context): Boolean {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -253,11 +265,226 @@ object VolumeAlarmManager {
         )
     }
 
+    private fun buildProfileTransitionPendingIntent(
+        context: Context,
+        flags: Int,
+        transitionAt: Long = 0L
+    ): PendingIntent? {
+        val intent = Intent(context, VolumeAlarmReceiver::class.java).apply {
+            action = ACTION_EXECUTE_PROFILE_TRANSITION
+            data = Uri.parse("smartvolume://profile/transition")
+            putExtra(EXTRA_IS_PROFILE_TRANSITION, true)
+            putExtra(EXTRA_IS_TEST, false)
+            putExtra(EXTRA_SLOT_MILLIS, transitionAt)
+        }
+        return PendingIntent.getBroadcast(
+            context.applicationContext,
+            REQUEST_CODE_PROFILE_TRANSITION,
+            intent,
+            flags or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    fun cancelProfileTransition(context: Context) {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val existing = buildProfileTransitionPendingIntent(context, PendingIntent.FLAG_NO_CREATE)
+        if (existing != null) {
+            am.cancel(existing)
+            existing.cancel()
+        }
+    }
+
+    fun scheduleNextProfileTransition(
+        context: Context,
+        afterMillis: Long = System.currentTimeMillis()
+    ): AlarmDispatchResult {
+        cancelProfileTransition(context)
+
+        val schedulerEnabled = VolumeSchedulerStorage.isSchedulerEnabled(context)
+        val profiles = VolumeSchedulerStorage.getProfiles(context)
+        val updatedProfiles = profiles.map { p ->
+            if (schedulerEnabled && p.enabled) {
+                p.copy(nextTransitionAt = VolumeProfileManager.computeNextStartMillis(p, afterMillis))
+            } else {
+                p.copy(nextTransitionAt = 0L)
+            }
+        }
+        VolumeSchedulerStorage.saveProfiles(context, updatedProfiles)
+
+        if (!schedulerEnabled || updatedProfiles.none { it.enabled }) {
+            VolumeSchedulerStorage.setNextProfileTransitionAt(context, 0L)
+            return AlarmDispatchResult(
+                scheduled = false,
+                exact = false,
+                nextTriggerAt = 0L,
+                mode = "disabled",
+                message = if (!schedulerEnabled) {
+                    "Master scheduler paused; profile transitions cleared."
+                } else {
+                    "No enabled volume profiles; no transition alarm queued."
+                }
+            )
+        }
+
+        val nextBoundary = VolumeProfileManager.computeNextTransitionMillis(updatedProfiles, afterMillis)
+            ?: run {
+                VolumeSchedulerStorage.setNextProfileTransitionAt(context, 0L)
+                return AlarmDispatchResult(
+                    scheduled = false,
+                    exact = false,
+                    nextTriggerAt = 0L,
+                    mode = "disabled",
+                    message = "No upcoming profile transition found."
+                )
+            }
+
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pendingIntent = buildProfileTransitionPendingIntent(
+            context = context,
+            flags = PendingIntent.FLAG_UPDATE_CURRENT,
+            transitionAt = nextBoundary
+        ) ?: return AlarmDispatchResult(
+            scheduled = false,
+            exact = false,
+            nextTriggerAt = 0L,
+            mode = "error",
+            message = "Failed to create PendingIntent for profile transition."
+        )
+
+        val exactAllowed = canScheduleExactAlarms(context)
+        val (usedExact, mode) = if (exactAllowed) {
+            try {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextBoundary, pendingIntent)
+                true to "exact"
+            } catch (_: SecurityException) {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextBoundary, pendingIntent)
+                false to "inexact_fallback"
+            }
+        } else {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextBoundary, pendingIntent)
+            false to "inexact_fallback"
+        }
+
+        VolumeSchedulerStorage.setNextProfileTransitionAt(context, nextBoundary)
+        return AlarmDispatchResult(
+            scheduled = true,
+            exact = usedExact,
+            nextTriggerAt = nextBoundary,
+            mode = mode,
+            message = if (usedExact) {
+                "Next profile transition scheduled via exact AlarmManager."
+            } else {
+                "Exact alarm permission restricted; next profile transition scheduled via inexact fallback."
+            }
+        )
+    }
+
+    fun recalculateProfilesAndSchedule(
+        context: Context,
+        activateIfCoversNow: Boolean,
+        forceApplyActiveIfChanged: Boolean,
+        source: String,
+        recordConflictLog: Boolean = true
+    ): ProfileRecalcResult {
+        cancelProfileTransition(context)
+
+        val profiles = VolumeSchedulerStorage.getProfiles(context)
+        val overlapReport = VolumeProfileManager.detectOverlaps(profiles)
+        val resolution = VolumeProfileManager.resolveProfileAt(context)
+        var outcome: ProfileExecutionOutcome? = null
+        var appliedSlotMillis = 0L
+
+        when (resolution.status) {
+            "paused" -> {
+                VolumeSchedulerStorage.setRuntimeActiveProfileId(context, null)
+            }
+
+            "conflict" -> {
+                VolumeSchedulerStorage.setRuntimeActiveProfileId(context, null)
+                if (activateIfCoversNow && recordConflictLog) {
+                    val conflictNames = resolution.conflictingProfiles.joinToString(", ") { it.name }
+                    VolumeSchedulerStorage.appendLog(
+                        context,
+                        ExecutionLogEntry(
+                            id = UUID.randomUUID().toString(),
+                            timestamp = System.currentTimeMillis(),
+                            source = "PROFILE_CONFLICT_SKIPPED",
+                            ruleId = resolution.conflictingProfiles.joinToString(",") { it.id },
+                            ruleName = conflictNames,
+                            activeProfileName = "Conflict (Unresolved Overlap)",
+                            scheduledTime = resolution.conflictingProfiles.firstOrNull()?.startTime ?: "",
+                            stream = "none",
+                            requestedPercentage = 0,
+                            indexBefore = 0,
+                            actualIndex = 0,
+                            maxIndex = 0,
+                            actualPercentage = 0,
+                            success = false,
+                            failureReason = resolution.message,
+                            message = resolution.message
+                        )
+                    )
+                }
+            }
+
+            "none" -> {
+                VolumeSchedulerStorage.setRuntimeActiveProfileId(context, null)
+                VolumeSchedulerStorage.setLastAppliedProfileKey(context, "")
+            }
+
+            "active", "fallback" -> {
+                val target = resolution.activeProfile
+                if (target != null) {
+                    val slotMillis = resolution.activeSlotMillis
+                    val slotKey = "${target.id}:$slotMillis"
+                    val lastKey = VolumeSchedulerStorage.getLastAppliedProfileKey(context)
+                    val currentRuntimeId = VolumeSchedulerStorage.getRuntimeActiveProfileId(context)
+                    val alreadyAppliedSlot = (lastKey == slotKey) ||
+                        (!resolution.isFallback && slotMillis > 0L && target.lastActivatedSlotMillis == slotMillis && currentRuntimeId == target.id)
+
+                    if (activateIfCoversNow && (forceApplyActiveIfChanged || !alreadyAppliedSlot)) {
+                        val execSource = if (resolution.isFallback) "PROFILE_FALLBACK" else source
+                        val schedLabel = if (resolution.isFallback) "Fallback" else target.startTime
+                        outcome = VolumeProfileManager.executeProfile(
+                            context = context,
+                            profile = target,
+                            source = execSource,
+                            scheduledTimeLabel = schedLabel,
+                            slotMillis = slotMillis,
+                            isFallback = resolution.isFallback
+                        )
+                        appliedSlotMillis = slotMillis
+                    } else {
+                        VolumeSchedulerStorage.setRuntimeActiveProfileId(context, target.id)
+                    }
+                }
+            }
+        }
+
+        val afterMillis = maxOf(System.currentTimeMillis(), appliedSlotMillis + 1000L)
+        val dispatch = scheduleNextProfileTransition(context, afterMillis)
+        val finalResolution = VolumeProfileManager.resolveProfileAt(context)
+
+        return ProfileRecalcResult(
+            resolution = finalResolution,
+            overlapReport = overlapReport,
+            dispatch = dispatch,
+            executedImmediately = outcome != null,
+            executionOutcome = outcome
+        )
+    }
+
     fun rescheduleAll(context: Context): Pair<Int, Boolean> {
         val schedulerEnabled = VolumeSchedulerStorage.isSchedulerEnabled(context)
         val schedules = VolumeSchedulerStorage.getSchedules(context)
         if (!schedulerEnabled) {
             schedules.forEach { cancelSchedule(context, it.id) }
+            cancelProfileTransition(context)
+            val clearedProfiles = VolumeSchedulerStorage.getProfiles(context).map {
+                it.copy(nextTransitionAt = 0L)
+            }
+            VolumeSchedulerStorage.saveProfiles(context, clearedProfiles)
+            VolumeSchedulerStorage.setNextProfileTransitionAt(context, 0L)
             return 0 to canScheduleExactAlarms(context)
         }
 
@@ -272,6 +499,11 @@ object VolumeAlarmManager {
                 cancelSchedule(context, schedule.id)
             }
         }
+
+        val profileRes = scheduleNextProfileTransition(context)
+        if (profileRes.scheduled) count++
+        if (!profileRes.exact) allExact = false
+
         return count to allExact
     }
 
@@ -280,6 +512,12 @@ object VolumeAlarmManager {
         schedules.forEach { schedule ->
             cancelSchedule(context, schedule.id)
         }
+        cancelProfileTransition(context)
+        VolumeSchedulerStorage.setNextProfileTransitionAt(context, 0L)
+        val clearedProfiles = VolumeSchedulerStorage.getProfiles(context).map {
+            it.copy(nextTransitionAt = 0L)
+        }
+        VolumeSchedulerStorage.saveProfiles(context, clearedProfiles)
     }
 
     fun scheduleTestAlarm(

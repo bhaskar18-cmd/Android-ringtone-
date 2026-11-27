@@ -31,6 +31,14 @@ class BootCompletedReceiver : BroadcastReceiver() {
                 Intent.ACTION_TIMEZONE_CHANGED -> "TIMEZONE_CHANGED"
                 else -> action
             }
+            if (VolumeSchedulerStorage.isSchedulerEnabled(context)) {
+                VolumeAlarmManager.recalculateProfilesAndSchedule(
+                    context = context,
+                    activateIfCoversNow = true,
+                    forceApplyActiveIfChanged = true,
+                    source = "BOOT_PROFILE_RESTORE"
+                )
+            }
             VolumeSchedulerStorage.recordBootRestore(context, reason, restoredCount)
         } finally {
             pendingResult.finish()

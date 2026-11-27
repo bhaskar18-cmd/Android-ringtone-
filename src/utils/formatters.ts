@@ -144,5 +144,67 @@ export function inferActiveProfileName(schedules: VolumeSchedule[], schedulerEna
     return `${title} · ${formatTime12h(s.time)} (Overnight)`;
   }
 
-  return 'Custom Active Schedule';
+  return 'No active schedule';
 }
+
+export const PROFILE_ICON_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'sun', label: 'Day' },
+  { key: 'moon', label: 'Night' },
+  { key: 'briefcase', label: 'Work' },
+  { key: 'home', label: 'Home' },
+  { key: 'car', label: 'Drive' },
+  { key: 'shield', label: 'Focus' },
+  { key: 'bell', label: 'Alerts' },
+  { key: 'volume', label: 'Media' },
+];
+
+export const PRIORITY_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 0, label: 'Standard (0)' },
+  { value: 1, label: 'Elevated (1)' },
+  { value: 2, label: 'High (2)' },
+  { value: 3, label: 'Critical (3)' },
+];
+
+export function toMinuteOfDay(time24: string): number {
+  const [hStr, mStr] = time24.split(':');
+  const h = Math.min(23, Math.max(0, Number.parseInt(hStr || '0', 10) || 0));
+  const m = Math.min(59, Math.max(0, Number.parseInt(mStr || '0', 10) || 0));
+  return h * 60 + m;
+}
+
+export function crossesMidnight(startTime: string, endTime: string): boolean {
+  return toMinuteOfDay(startTime) > toMinuteOfDay(endTime);
+}
+
+export function isMinuteInProfileRange(
+  minuteOfDay: number,
+  startTime: string,
+  endTime: string
+): boolean {
+  const startMin = toMinuteOfDay(startTime);
+  const endMin = toMinuteOfDay(endTime);
+  if (startMin <= endMin) {
+    return minuteOfDay >= startMin && minuteOfDay <= endMin;
+  }
+  return minuteOfDay >= startMin || minuteOfDay <= endMin;
+}
+
+export function doProfileRangesOverlap(
+  a: { startTime: string; endTime: string },
+  b: { startTime: string; endTime: string }
+): boolean {
+  for (let m = 0; m < 1440; m++) {
+    if (
+      isMinuteInProfileRange(m, a.startTime, a.endTime) &&
+      isMinuteInProfileRange(m, b.startTime, b.endTime)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function formatTimeRange12h(startTime: string, endTime: string): string {
+  return `${formatTime12h(startTime)} – ${formatTime12h(endTime)}`;
+}
+

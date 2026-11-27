@@ -583,7 +583,8 @@ export const TestingTab: React.FC<TestingTabProps> = ({
 
                       {entry.ruleId && (
                         <p className="text-[11px] font-mono-tabular text-slate-500">
-                          Rule ID: {entry.ruleId}
+                          {entry.activeProfileName ? `Active profile: ${entry.activeProfileName} · ` : ''}
+                          ID: {entry.ruleId}
                         </p>
                       )}
 
